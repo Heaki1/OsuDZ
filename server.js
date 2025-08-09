@@ -1090,3 +1090,5 @@ app.listen(port, async () => {
     log('ERROR', '❌ Startup failed:', err.message);
   }
 });
+
+setInterval(updateLeaderboards, 6 * 60 * 60 * 1000); // Every 6 hours
