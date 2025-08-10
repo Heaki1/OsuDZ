@@ -39,16 +39,141 @@ function log(level, ...args) {
   console.log(`${color}[${ts}] ${level}:${colors.reset}`, ...args);
 }
 
-// Redis setup for caching (with TLS for Redis Cloud)
+// Redis setup for caching (with TLS detection and enhanced error handling)
 const redisClient = redis.createClient({
   url: process.env.REDIS_URL,
   socket: {
-    tls: true,              // enable TLS
-    rejectUnauthorized: false // skip cert validation if needed
+    // Only use TLS if URL starts with rediss:// (secure Redis)
+    ...(process.env.REDIS_URL?.startsWith('rediss://') ? {
+      tls: true,
+      rejectUnauthorized: false
+    } : {}),
+    connectTimeout: 10000
   }
 });
 
-redisClient.on('error', (err) => log('ERROR', 'Redis error:', err));
+// Alternative configuration with error handling
+// const redisClient = redis.createClient({
+//   url: process.env.REDIS_URL,
+//   socket: {
+//     ...(process.env.REDIS_URL?.startsWith('rediss://') || process.env.REDIS_TLS === 'true' 
+//       ? { 
+//           tls: true, 
+//           rejectUnauthorized: false // Set to true in production with proper certificates
+//         } 
+//       : {}),
+//     connectTimeout: 10000,
+//     reconnectStrategy: (retries) => {
+//       if (retries > 10) {
+//         console.log('Redis: Too many retry attempts, giving up');
+//         return false;
+//       }
+//       console.log(`Redis: Retry attempt ${retries}`);
+//       return Math.min(retries * 100, 3000);
+//     }
+//   }
+// });
+
+redisClient.on('error', (err) => {
+  log('ERROR', 'Redis error:', err.message);
+  if (err.code === 'ERR_SSL_WRONG_VERSION_NUMBER') {
+    log('WARN', '🔧 Redis SSL Error: Check if your REDIS_URL should use redis:// instead of rediss://');
+    log('WARN', '💡 Or ensure your Redis provider supports SSL/TLS connections');
+  }
+});
+
+redisClient.on('connect', () => {
+  log('INFO', '🔴 Redis connecting...');
+});
+
+redisClient.on('ready', () => {
+  log('INFO', '✅ Redis connection ready');
+});
+
+redisClient.on('reconnecting', () => {
+  log('WARN', '🔄 Redis reconnecting...');
+});
+
+// Enhanced caching utilities with fallback
+async function getCached(key, fetchFunction, ttl = 300) {
+  try {
+    // Check if Redis is connected
+    if (redisClient.isReady) {
+      const cached = await redisClient.get(key);
+      if (cached) {
+        log('DEBUG', `📦 Cache hit for key: ${key}`);
+        return JSON.parse(cached);
+      }
+    } else {
+      log('WARN', '⚠️ Redis not ready, skipping cache read');
+    }
+    
+    const data = await fetchFunction();
+    
+    // Only cache if Redis is ready
+    if (redisClient.isReady) {
+      try {
+        await redisClient.setex(key, ttl, JSON.stringify(data));
+        log('DEBUG', `💾 Cached data for key: ${key}`);
+      } catch (cacheError) {
+        log('WARN', 'Cache write failed:', cacheError.message);
+      }
+    }
+    
+    return data;
+  } catch (err) {
+    log('WARN', 'Cache error, falling back to direct fetch:', err.message);
+    return await fetchFunction();
+  }
+}
+
+async function invalidateCache(pattern) {
+  try {
+    if (redisClient.isReady) {
+      const keys = await redisClient.keys(pattern);
+      if (keys.length > 0) {
+        await redisClient.del(...keys);
+        log('INFO', `🗑️ Invalidated ${keys.length} cache keys`);
+      }
+    }
+  } catch (err) {
+    log('WARN', 'Cache invalidation failed:', err.message);
+  }
+}
+
+// Graceful Redis connection with retry
+async function connectRedis() {
+  const maxRetries = 5;
+  let retries = 0;
+  
+  while (retries < maxRetries) {
+    try {
+      await redisClient.connect();
+      log('INFO', '🔴 Redis connected successfully');
+      return true;
+    } catch (err) {
+      retries++;
+      log('ERROR', `❌ Redis connection attempt ${retries} failed:`, err.message);
+      
+      if (err.code === 'ERR_SSL_WRONG_VERSION_NUMBER') {
+        log('ERROR', '🔧 SSL Error detected. Possible solutions:');
+        log('ERROR', '   1. Change REDIS_URL from rediss:// to redis://');
+        log('ERROR', '   2. Set REDIS_TLS=false in environment variables');
+        log('ERROR', '   3. Check if your Redis provider requires SSL');
+        break;
+      }
+      
+      if (retries < maxRetries) {
+        const delay = Math.min(1000 * Math.pow(2, retries), 10000);
+        log('INFO', `⏳ Retrying Redis connection in ${delay}ms...`);
+        await new Promise(resolve => setTimeout(resolve, delay));
+      }
+    }
+  }
+  
+  log('ERROR', '❌ Redis connection failed after all retries. Running without cache.');
+  return false;
+}
 
 // WebSocket server for real-time updates
 if (process.env.WS_ENABLED !== 'false') {
@@ -340,32 +465,6 @@ async function insertDefaultAchievements() {
       VALUES ($1, $2, $3, $4, $5)
       ON CONFLICT (name) DO NOTHING
     `, [achievement.name, achievement.description, achievement.category, achievement.icon, achievement.points]);
-  }
-}
-
-// Caching utilities
-async function getCached(key, fetchFunction, ttl = 300) {
-  try {
-    const cached = await redisClient.get(key);
-    if (cached) return JSON.parse(cached);
-    
-    const data = await fetchFunction();
-    await redisClient.setex(key, ttl, JSON.stringify(data));
-    return data;
-  } catch (err) {
-    log('WARN', 'Cache error, falling back to direct fetch:', err.message);
-    return await fetchFunction();
-  }
-}
-
-async function invalidateCache(pattern) {
-  try {
-    const keys = await redisClient.keys(pattern);
-    if (keys.length > 0) {
-      await redisClient.del(...keys);
-    }
-  } catch (err) {
-    log('WARN', 'Cache invalidation failed:', err.message);
   }
 }
 
@@ -715,6 +814,9 @@ async function updatePlayerSkills(username, playerScores) {
       await query(`
         INSERT INTO skill_tracking (username, skill_type, skill_value, calculated_at)
         VALUES ($1, $2, $3, $4)
+        ON CONFLICT (username, skill_type) DO UPDATE SET
+          skill_value = EXCLUDED.skill_value,
+          calculated_at = EXCLUDED.calculated_at
       `, [username, skillType, skillValue, now]);
     }
     
