@@ -65,7 +65,6 @@ redisClient.connect()
   .catch((err) => console.error('❌ Redis connection failed:', err));
 
 // WebSocket server for real-time updates
-const wss = new WebSocket.Server({ port: process.env.WS_PORT || 8080 });
 const broadcastToClients = (data) => {
   wss.clients.forEach(client => {
     if (client.readyState === WebSocket.OPEN) {
