@@ -2031,6 +2031,9 @@ process.on('SIGINT', async () => {
   process.exit(0);
 });
 
+// <-- Add this closing brace to fix the error
+}
+
 process.on('uncaughtException', (err) => {
   log('ERROR', '💥 Uncaught exception:', err);
   process.exit(1);
