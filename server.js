@@ -2071,4 +2071,3 @@ app.listen(port, async () => {
     log('ERROR', '❌ Startup failed:', err.message);
   }
 });
-          
