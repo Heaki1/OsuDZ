@@ -1835,14 +1835,10 @@ app.post('/api/admin/force-scan', authenticateToken, async (req, res) => {
     if (req.user.role !== 'admin') {
       return res.status(403).json({ success: false, error: 'Admin access required' });
     }
-    
     log('INFO', '🔧 Manual scan triggered via API');
-    
-    // Run scan in background
     updateLeaderboards().catch(err => {
       log('ERROR', '❌ Manual scan failed:', err.message);
     });
-    
     res.json({ success: true, message: 'Manual scan started' });
   } catch (err) {
     log('ERROR', '❌ Force scan error:', err.message);
@@ -1855,63 +1851,30 @@ app.post('/api/admin/recalculate-stats', authenticateToken, async (req, res) => 
     if (req.user.role !== 'admin') {
       return res.status(403).json({ success: false, error: 'Admin access required' });
     }
-    
     const players = await getRows(`SELECT DISTINCT username FROM algeria_top50`);
-    
     let processed = 0;
     for (const player of players) {
       await updatePlayerStats(player.username);
       await checkAchievements(player.username);
       processed++;
-      
       if (processed % 10 === 0) {
         log('INFO', `📊 Recalculated stats for ${processed}/${players.length} players`);
       }
     }
-    
     await invalidateCache('*');
-    
-    res.json({ 
-      success: true, 
-      message: `Recalculated stats for ${processed} players` 
-    });
+    res.json({ success: true, message: `Recalculated stats for ${processed} players` });
   } catch (err) {
     log('ERROR', '❌ Stats recalculation error:', err.message);
     res.status(500).json({ success: false, error: 'Recalculation failed' });
   }
 });
 
-// WebSocket handlers
-wss.on('connection', (ws) => {
-  log('INFO', '🔌 New WebSocket connection');
-  
-  ws.on('message', (message) => {
-    try {
-      const data = JSON.parse(message);
-      
-      if (data.type === 'subscribe') {
-        ws.subscriptions = data.channels || ['all'];
-        ws.send(JSON.stringify({ type: 'subscribed', channels: ws.subscriptions }));
-      }
-    } catch (err) {
-      log('ERROR', 'WebSocket message error:', err.message);
-    }
-  });
-  
-  ws.on('close', () => {
-    log('INFO', '🔌 WebSocket connection closed');
-  });
-});
-
 // Enhanced update function with comprehensive features
 async function updateLeaderboards() {
   log('INFO', "🔄 Starting comprehensive leaderboards update...");
-  
   try {
     const beatmaps = await getAllBeatmaps();
     await saveProgress("total_beatmaps", beatmaps.length);
-
-    // Priority scanning for known maps
     const priorityBeatmaps = await getRows(`
       SELECT beatmap_id, MIN(beatmap_title) AS beatmap_title
       FROM algeria_top50
@@ -1919,31 +1882,23 @@ async function updateLeaderboards() {
       ORDER BY MIN(last_updated) ASC
       LIMIT 200
     `);
-    
     if (priorityBeatmaps.length > 0) {
       log('INFO', `⚡ Priority scanning ${priorityBeatmaps.length} known beatmaps`);
-      
       for (const bm of priorityBeatmaps) {
         await limiter.schedule(() => fetchLeaderboard(bm.beatmap_id, bm.beatmap_title));
       }
     }
-
-    // Regular scanning with progress tracking
     let startIndex = parseInt(await getProgress("last_index") || "0", 10);
     if (startIndex >= beatmaps.length) {
       startIndex = 0;
       await saveProgress("last_index", "0");
     }
-
     log('INFO', `📌 Regular scanning from index ${startIndex}/${beatmaps.length}`);
-    
     const batchSize = 100;
     for (let i = startIndex; i < Math.min(startIndex + batchSize, beatmaps.length); i++) {
       const bm = beatmaps[i];
       await limiter.schedule(() => fetchLeaderboard(bm.id, bm.title));
       await saveProgress("last_index", i + 1);
-      
-      // Progress broadcast
       if (i % 10 === 0) {
         broadcastToClients({
           type: 'scan_progress',
@@ -1955,22 +1910,15 @@ async function updateLeaderboards() {
         });
       }
     }
-    
-    // Calculate daily statistics
     await calculateDailyStats();
-    
-    // Invalidate relevant caches
     await invalidateCache('leaderboard:*');
     await invalidateCache('rankings:*');
     await invalidateCache('analytics:*');
-    
     log('INFO', "✅ Comprehensive leaderboard update completed");
-    
     broadcastToClients({
       type: 'scan_complete',
       timestamp: Date.now()
     });
-    
   } catch (err) {
     log('ERROR', '❌ Leaderboard update failed:', err.message);
     broadcastToClients({
@@ -1985,70 +1933,43 @@ async function getAllBeatmaps() {
   let allBeatmaps = [];
   let page = 1;
   const maxPages = 50;
-  
   while (page <= maxPages) {
     try {
       const token = await getAccessToken();
-      
       const res = await axios.get('https://osu.ppy.sh/api/v2/beatmapsets/search', {
         headers: { Authorization: `Bearer ${token}` },
-        params: { 
-          mode: 'osu', 
-          nsfw: false, 
-          sort: 'ranked_desc', 
-          page,
-          's': 'ranked'
-        }
+        params: { mode: 'osu', nsfw: false, sort: 'ranked_desc', page, 's': 'ranked' }
       });
-      
       const sets = res.data.beatmapsets || [];
       if (sets.length === 0) break;
-      
       const beatmaps = sets.flatMap(set =>
         (set.beatmaps || [])
           .filter(bm => bm.difficulty_rating >= 2.0)
-          .map(bm => ({ 
-            id: bm.id, 
-            title: `${set.artist} - ${set.title} [${bm.version}]`,
-            difficulty: bm.difficulty_rating
-          }))
+          .map(bm => ({ id: bm.id, title: `${set.artist} - ${set.title} [${bm.version}]`, difficulty: bm.difficulty_rating }))
       );
-      
       allBeatmaps.push(...beatmaps);
       page++;
-      
       await new Promise(resolve => setTimeout(resolve, 1000));
-      
     } catch (err) {
       log('ERROR', `❌ Failed to fetch beatmap page ${page}:`, err.message);
       break;
     }
   }
-  
   return allBeatmaps;
 }
 
 // Enhanced error handling and graceful shutdown
 process.on('SIGINT', async () => {
   log('INFO', '🛑 Shutting down gracefully...');
-  
-  // Close WebSocket server
   wss.close();
-  
-  // Close database connections
   await pool.end();
-  
-  // Close Redis connection
   redisClient.quit();
-  
   process.exit(0);
 });
-
 process.on('uncaughtException', (err) => {
   log('ERROR', '💥 Uncaught exception:', err);
   process.exit(1);
 });
-
 process.on('unhandledRejection', (reason, promise) => {
   log('ERROR', '💥 Unhandled rejection at:', promise, 'reason:', reason);
 });
@@ -2056,32 +1977,49 @@ process.on('unhandledRejection', (reason, promise) => {
 // Rate limiter for API
 const limiter = new Bottleneck({ maxConcurrent: 3, minTime: 600 });
 
-// Start server
-app.listen(port, async () => {
+// === Render-friendly server start ===
+const server = app.listen(port, async () => {
   log('INFO', `✅ Enhanced Algeria osu! server running on port ${port}`);
-  log('INFO', `🔌 WebSocket server running on port ${process.env.WS_PORT || 8080}`);
   log('INFO', `📊 Admin dashboard: http://localhost:${port}/admin`);
-  
   try {
-    // Connect to Redis
     await redisClient.connect();
     log('INFO', '🔴 Redis connected');
-    
-    // Initialize database
     await ensureTables();
-    
-    // Initial update
     setTimeout(updateLeaderboards, 5000);
-    
-    // Schedule regular updates (every 30 minutes)
     setInterval(updateLeaderboards, 30 * 60 * 1000);
-    
-    // Daily stats calculation (every hour)
     setInterval(calculateDailyStats, 60 * 60 * 1000);
-    
     log('INFO', '🚀 All systems operational - Enhanced backend ready!');
   } catch (err) {
     log('ERROR', '❌ Startup failed:', err.message);
   }
+});
+
+// Attach WebSocket to same HTTP server
+const wss = new WebSocket.Server({ server });
+
+const broadcastToClients = (data) => {
+  wss.clients.forEach(client => {
+    if (client.readyState === WebSocket.OPEN) {
+      client.send(JSON.stringify(data));
+    }
+  });
+};
+
+wss.on('connection', (ws) => {
+  log('INFO', '🔌 New WebSocket connection');
+  ws.on('message', (message) => {
+    try {
+      const data = JSON.parse(message);
+      if (data.type === 'subscribe') {
+        ws.subscriptions = data.channels || ['all'];
+        ws.send(JSON.stringify({ type: 'subscribed', channels: ws.subscriptions }));
+      }
+    } catch (err) {
+      log('ERROR', 'WebSocket message error:', err.message);
+    }
+  });
+  ws.on('close', () => {
+    log('INFO', '🔌 WebSocket connection closed');
+  });
 });
           
