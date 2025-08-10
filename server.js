@@ -40,7 +40,9 @@ function log(level, ...args) {
 }
 
 // Redis setup for caching
-const redisClient = redis.createClient(process.env.REDIS_URL);
+const redisClient = redis.createClient({
+  url: process.env.REDIS_URL
+});
 redisClient.on('error', (err) => log('ERROR', 'Redis error:', err));
 
 // WebSocket server for real-time updates
