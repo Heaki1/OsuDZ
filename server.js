@@ -6,7 +6,6 @@ const path = require('path');
 const Bottleneck = require('bottleneck');
 const { Pool } = require('pg');
 const redis = require('redis');
-const WebSocket = require('ws');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 const rateLimit = require('express-rate-limit');
