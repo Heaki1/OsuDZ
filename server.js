@@ -962,7 +962,7 @@ app.get('/api/leaderboards', async (req, res) => {
       let paramCount = 0;
       
       if (minDifficulty > 0) {
-        whereClause += ` AND difficulty_rating >= ${++paramCount}`;
+        whereClause += ` AND difficulty_rating >= $${++paramCount}`;
         params.push(parseFloat(minDifficulty));
       }
       
@@ -1127,7 +1127,7 @@ app.get('/api/rankings', async (req, res) => {
     
     const data = await getCached(cacheKey, async () => {
       const allowedSort = ['weighted_pp', 'total_pp', 'first_places', 'avg_rank', 'accuracy_avg', 'total_scores'];
-      const sortColumn = allowedSort.includes(sort) ? sort : 'weighted_pp';
+     const sortColumn = allowedSort.includes(sort.toLowerCase()) ? sort.toLowerCase() : 'weighted_pp';
       const sortOrder = sort === 'avg_rank' ? 'ASC' : 'DESC';
       
       let whereClause = `WHERE total_scores >= $1`;
