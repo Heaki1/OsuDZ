@@ -2,7 +2,6 @@
   "name": "new-project",
   "version": "1.0.0",
   "description": "",
-  "type": "module",
   "main": "enhanced_server.js",
   "scripts": {
     "start": "node server.js",
