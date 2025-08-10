@@ -1971,10 +1971,30 @@ process.on('unhandledRejection', (reason, promise) => {
 const limiter = new Bottleneck({ maxConcurrent: 3, minTime: 600 });
 
 // === Render-friendly server start ===
-// Start HTTP server first
-const server = app.listen(port, () => {
+const server = app.listen(port, async () => {
   log('INFO', `✅ Enhanced Algeria osu! server running on port ${port}`);
   log('INFO', `📊 Admin dashboard: http://localhost:${port}/admin`);
+
+  try {
+    await redisClient.connect();
+    log('INFO', '🔴 Redis connected');
+
+    await ensureTables();
+
+    // Initial update
+    setTimeout(updateLeaderboards, 5000);
+
+    // Schedule regular updates (every 30 minutes)
+    setInterval(updateLeaderboards, 30 * 60 * 1000);
+
+    // Daily stats calculation (every hour)
+    setInterval(calculateDailyStats, 60 * 60 * 1000);
+
+    log('INFO', '🚀 All systems operational - Enhanced backend ready!');
+  } catch (err) {
+    log('ERROR', '❌ Startup failed:', err.message);
+    process.exit(1); // Exit so Render restarts cleanly without socket conflict
+  }
 });
 
 // Attach WebSocket to same HTTP server
@@ -2005,27 +2025,3 @@ wss.on('connection', (ws) => {
     log('INFO', '🔌 WebSocket connection closed');
   });
 });
-
-// Async initialization (runs once)
-(async () => {
-  try {
-    await redisClient.connect();
-    log('INFO', '🔴 Redis connected');
-
-    await ensureTables();
-
-    // Initial update
-    setTimeout(updateLeaderboards, 5000);
-
-    // Schedule regular updates (every 30 minutes)
-    setInterval(updateLeaderboards, 30 * 60 * 1000);
-
-    // Daily stats calculation (every hour)
-    setInterval(calculateDailyStats, 60 * 60 * 1000);
-
-    log('INFO', '🚀 All systems operational - Enhanced backend ready!');
-  } catch (err) {
-    log('ERROR', '❌ Startup failed:', err.message);
-    process.exit(1); // Exit so Render restarts cleanly without socket conflict
-  }
-})();
