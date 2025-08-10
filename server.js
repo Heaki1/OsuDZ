@@ -1,4 +1,3 @@
-// Enhanced server.js with comprehensive backend features
 require('dotenv').config();
 const express = require('express');
 const axios = require('axios');
@@ -20,12 +19,12 @@ const port = process.env.PORT || 3000;
 app.use(helmet());
 
 // Rate limiting
-const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100, // limit each IP to 100 requests per windowMs
+const httpLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 100,
   message: 'Too many requests from this IP'
 });
-app.use(limiter);
+app.use(httpLimiter);
 
 // Enhanced logging with colors and levels
 const colors = {
