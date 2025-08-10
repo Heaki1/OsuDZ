@@ -196,34 +196,46 @@ if (process.env.WS_ENABLED !== 'false') {
   async function getRows(sql, params = []) { return (await pool.query(sql, params)).rows; }
   async function getRow(sql, params = []) { return (await pool.query(sql, params)).rows[0]; }
 
-  // Comprehensive database schema
-  async function ensureTables() {
-    // Core leaderboard table with enhanced fields
-    await query(`
-      CREATE TABLE IF NOT EXISTS algeria_top50 (
-        beatmap_id BIGINT,
-        beatmap_title TEXT,
-        artist TEXT,
-        difficulty_name TEXT,
-        player_id BIGINT,
-        username TEXT,
-        rank INTEGER,
-        score BIGINT,
-        accuracy REAL,
-        accuracy_text TEXT,
-        mods TEXT,
-        pp REAL DEFAULT 0,
-        difficulty_rating REAL DEFAULT 0,
-        max_combo INTEGER DEFAULT 0,
-        count_300 INTEGER DEFAULT 0,
-        count_100 INTEGER DEFAULT 0,
-        count_50 INTEGER DEFAULT 0,
-        count_miss INTEGER DEFAULT 0,
-        play_date BIGINT,
-        last_updated BIGINT,
-        PRIMARY KEY (beatmap_id, player_id)
-      );
-    `);
+// Comprehensive database schema
+async function ensureTables() {
+  // Core leaderboard table with enhanced fields
+  await query(`
+    CREATE TABLE IF NOT EXISTS algeria_top50 (
+      beatmap_id BIGINT,
+      beatmap_title TEXT,
+      artist TEXT,
+      difficulty_name TEXT,
+      player_id BIGINT,
+      username TEXT,
+      rank INTEGER,
+      score BIGINT,
+      accuracy REAL,
+      accuracy_text TEXT,
+      mods TEXT,
+      pp REAL DEFAULT 0,
+      difficulty_rating REAL DEFAULT 0,
+      max_combo INTEGER DEFAULT 0,
+      count_300 INTEGER DEFAULT 0,
+      count_100 INTEGER DEFAULT 0,
+      count_50 INTEGER DEFAULT 0,
+      count_miss INTEGER DEFAULT 0,
+      play_date BIGINT,
+      last_updated BIGINT,
+      PRIMARY KEY (beatmap_id, player_id)
+    );
+  `);
+
+  // Add missing columns to 'players' table
+  await query(`
+    ALTER TABLE players ADD COLUMN IF NOT EXISTS pp NUMERIC;
+  `);
+  await query(`
+    ALTER TABLE players ADD COLUMN IF NOT EXISTS total_pp NUMERIC;
+  `);
+  await query(`
+    ALTER TABLE players ADD COLUMN IF NOT EXISTS country_rank INTEGER;
+  `);
+}
 
     // Enhanced player statistics
     await query(`
