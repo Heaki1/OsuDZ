@@ -1971,35 +1971,18 @@ process.on('unhandledRejection', (reason, promise) => {
 const limiter = new Bottleneck({ maxConcurrent: 3, minTime: 600 });
 
 // === Render-friendly server start ===
-const server = app.listen(port, async () => {
-  log('INFO', `✅ Enhanced Algeria osu! server running on port ${port}`);
-  log('INFO', `📊 Admin dashboard: http://localhost:${port}/admin`);
+const { createServer } = require('http');
 
-  try {
-    await redisClient.connect();
-    log('INFO', '🔴 Redis connected');
+// Create HTTP server from Express app
+const server = createServer(app);
 
-    await ensureTables();
-
-    // Initial update
-    setTimeout(updateLeaderboards, 5000);
-
-    // Schedule regular updates (every 30 minutes)
-    setInterval(updateLeaderboards, 30 * 60 * 1000);
-
-    // Daily stats calculation (every hour)
-    setInterval(calculateDailyStats, 60 * 60 * 1000);
-
-    log('INFO', '🚀 All systems operational - Enhanced backend ready!');
-  } catch (err) {
-    log('ERROR', '❌ Startup failed:', err.message);
-    process.exit(1); // Exit so Render restarts cleanly without socket conflict
-  }
+// Attach WebSocket server to same HTTP server (no separate port)
+const wss = new WebSocket.Server({
+  server,
+  path: '/ws' // optional path for WS clients
 });
 
-// Attach WebSocket to same HTTP server
-const wss = new WebSocket.Server({ server });
-
+// Broadcast helper
 const broadcastToClients = (data) => {
   wss.clients.forEach(client => {
     if (client.readyState === WebSocket.OPEN) {
@@ -2008,20 +1991,78 @@ const broadcastToClients = (data) => {
   });
 };
 
-wss.on('connection', (ws) => {
-  log('INFO', '🔌 New WebSocket connection');
+// WebSocket connection handler
+wss.on('connection', (ws, req) => {
+  log('INFO', '🔌 New WebSocket connection from', req.socket.remoteAddress);
+
+  ws.send(JSON.stringify({
+    type: 'connected',
+    message: 'Connected to Algeria osu! leaderboard updates'
+  }));
+
   ws.on('message', (message) => {
     try {
       const data = JSON.parse(message);
       if (data.type === 'subscribe') {
         ws.subscriptions = data.channels || ['all'];
         ws.send(JSON.stringify({ type: 'subscribed', channels: ws.subscriptions }));
+        log('INFO', `📡 Client subscribed to channels:`, ws.subscriptions);
       }
     } catch (err) {
       log('ERROR', 'WebSocket message error:', err.message);
+      ws.send(JSON.stringify({ type: 'error', message: 'Invalid message format' }));
     }
   });
-  ws.on('close', () => {
-    log('INFO', '🔌 WebSocket connection closed');
-  });
+
+  ws.on('close', () => log('INFO', '🔌 WebSocket connection closed'));
+  ws.on('error', (err) => log('ERROR', '🔌 WebSocket error:', err.message));
+});
+
+// Graceful shutdown
+process.on('SIGINT', async () => {
+  log('INFO', '🛑 Shutting down gracefully...');
+
+  wss.close(() => log('INFO', '🔌 WebSocket server closed'));
+  server.close(() => log('INFO', '🌐 HTTP server closed'));
+
+  try {
+    await pool.end();
+    log('INFO', '🗄️ Database connections closed');
+  } catch (err) {
+    log('ERROR', 'Database close error:', err.message);
+  }
+
+  try {
+    if (redisClient.isOpen) {
+      await redisClient.quit();
+      log('INFO', '🔴 Redis connection closed');
+    }
+  } catch (err) {
+    log('ERROR', 'Redis close error:', err.message);
+  }
+
+  process.exit(0);
+});
+
+// Start server
+server.listen(port, async () => {
+  log('INFO', `✅ Enhanced Algeria osu! server running on port ${port}`);
+  log('INFO', `🔌 WebSocket server attached to same port (${port}/ws)`);
+  log('INFO', `📊 Admin dashboard: http://localhost:${port}/admin`);
+
+  try {
+    await redisClient.connect();
+    log('INFO', '🔴 Redis connected');
+
+    await ensureTables();
+
+    setTimeout(updateLeaderboards, 5000);
+    setInterval(updateLeaderboards, 30 * 60 * 1000);
+    setInterval(calculateDailyStats, 60 * 60 * 1000);
+
+    log('INFO', '🚀 All systems operational - Enhanced backend ready!');
+  } catch (err) {
+    log('ERROR', '❌ Startup error:', err.message);
+    process.exit(1);
+  }
 });
