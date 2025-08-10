@@ -43,8 +43,8 @@ function log(level, ...args) {
 const redisClient = redis.createClient({
   url: process.env.REDIS_URL,
   socket: {
-    tls: true,
-    rejectUnauthorized: false // if your Redis Cloud doesn't have a CA cert
+    tls: true,              // enable TLS
+    rejectUnauthorized: false // skip cert validation if needed
   }
 });
 
