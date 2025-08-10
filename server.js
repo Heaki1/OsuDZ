@@ -40,15 +40,30 @@ function log(level, ...args) {
 }
 
 // Redis setup for caching (with TLS for Redis Cloud)
-const redisClient = redis.createClient({
-  url: process.env.REDIS_URL,
-  socket: {
-    tls: true,              // enable TLS
-    rejectUnauthorized: false // skip cert validation if needed
-  }
+const redis = require('redis');
+const url = process.env.REDIS_URL;
+
+let redisOptions = { url };
+
+if (url && url.startsWith('rediss://')) {
+  // Enable TLS for Redis Cloud
+  const { hostname } = new URL(url);
+  redisOptions.socket = {
+    tls: true,
+    servername: hostname, // ensures SSL cert matches host
+    rejectUnauthorized: false // skip strict cert check if needed
+  };
+}
+
+const redisClient = redis.createClient(redisOptions);
+
+redisClient.on('error', (err) => {
+  console.error('[Redis Error]', err);
 });
 
-redisClient.on('error', (err) => log('ERROR', 'Redis error:', err));
+redisClient.connect()
+  .then(() => console.log('✅ Connected to Redis'))
+  .catch((err) => console.error('❌ Redis connection failed:', err));
 
 // WebSocket server for real-time updates
 const wss = new WebSocket.Server({ port: process.env.WS_PORT || 8080 });
