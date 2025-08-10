@@ -40,7 +40,6 @@ function log(level, ...args) {
 }
 
 // Redis setup for caching (with TLS for Redis Cloud)
-const redis = require('redis');
 const url = process.env.REDIS_URL;
 
 let redisOptions = { url };
