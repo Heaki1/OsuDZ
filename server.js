@@ -31,6 +31,7 @@ const colors = {
   reset: '\x1b[0m', bright: '\x1b[1m', red: '\x1b[31m', green: '\x1b[32m',
   yellow: '\x1b[33m', blue: '\x1b[34m', magenta: '\x1b[35m', cyan: '\x1b[36m'
 };
+}
 
 function log(level, ...args) {
   const ts = new Date().toISOString().replace('T', ' ').split('.')[0];
@@ -40,31 +41,18 @@ function log(level, ...args) {
 }
 
 // Redis setup for caching (with TLS for Redis Cloud)
-const url = process.env.REDIS_URL;
-
-let redisOptions = { url };
-
-if (url && url.startsWith('rediss://')) {
-  // Enable TLS for Redis Cloud
-  const { hostname } = new URL(url);
-  redisOptions.socket = {
-    tls: true,
-    servername: hostname, // ensures SSL cert matches host
-    rejectUnauthorized: false // skip strict cert check if needed
-  };
-}
-
-const redisClient = redis.createClient(redisOptions);
-
-redisClient.on('error', (err) => {
-  console.error('[Redis Error]', err);
+const redisClient = redis.createClient({
+  url: process.env.REDIS_URL,
+  socket: {
+    tls: true,              // enable TLS
+    rejectUnauthorized: false // skip cert validation if needed
+  }
 });
 
-redisClient.connect()
-  .then(() => console.log('✅ Connected to Redis'))
-  .catch((err) => console.error('❌ Redis connection failed:', err));
+redisClient.on('error', (err) => log('ERROR', 'Redis error:', err));
 
 // WebSocket server for real-time updates
+if (process.env.WS_ENABLED !== 'false') {
 const wss = new WebSocket.Server({ port: process.env.WS_PORT || 8080 });
 const broadcastToClients = (data) => {
   wss.clients.forEach(client => {
