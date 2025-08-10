@@ -64,14 +64,6 @@ redisClient.connect()
   .then(() => console.log('✅ Connected to Redis'))
   .catch((err) => console.error('❌ Redis connection failed:', err));
 
-// WebSocket server for real-time updates
-const broadcastToClients = (data) => {
-  wss.clients.forEach(client => {
-    if (client.readyState === WebSocket.OPEN) {
-      client.send(JSON.stringify(data));
-    }
-  });
-};
 
 // Enhanced database setup with connection pooling
 const pool = new Pool({
