@@ -39,10 +39,15 @@ function log(level, ...args) {
   console.log(`${color}[${ts}] ${level}:${colors.reset}`, ...args);
 }
 
-// Redis setup for caching
+// Redis setup for caching (with TLS for Redis Cloud)
 const redisClient = redis.createClient({
-  url: process.env.REDIS_URL
+  url: process.env.REDIS_URL,
+  socket: {
+    tls: true,
+    rejectUnauthorized: false // if your Redis Cloud doesn't have a CA cert
+  }
 });
+
 redisClient.on('error', (err) => log('ERROR', 'Redis error:', err));
 
 // WebSocket server for real-time updates
