@@ -1,1863 +1,1440 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>osu! Algeria Top 50 Leaderboard - Enhanced</title>
-  <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
-  <style>
-    * {
-      margin: 0;
-      padding: 0;
-      box-sizing: border-box;
-    }
-
-    :root {
-      --primary-color: #ff66aa;
-      --secondary-color: #ff3399;
-      --accent-color: #ffb3d9;
-      --dark-bg: #1a1a1a;
-      --light-bg: #ffffff;
-      --card-bg: #f8f9fa;
-      --text-primary: #333;
-      --text-secondary: #666;
-      --border-color: #e9ecef;
-      --success-color: #28a745;
-      --warning-color: #ffc107;
-      --danger-color: #dc3545;
-      --shadow: 0 2px 20px rgba(0,0,0,0.1);
-    }
-
-    [data-theme="dark"] {
-      --light-bg: #2d2d2d;
-      --card-bg: #3a3a3a;
-      --text-primary: #ffffff;
-      --text-secondary: #cccccc;
-      --border-color: #4a4a4a;
-      --shadow: 0 2px 20px rgba(0,0,0,0.3);
-    }
-
-    body {
-      font-family: 'Segoe UI', 'SF Pro Display', system-ui, -apple-system, sans-serif;
-      background: var(--light-bg);
-      color: var(--text-primary);
-      line-height: 1.6;
-      transition: all 0.3s ease;
-    }
-
-    .container {
-      max-width: 1400px;
-      margin: 0 auto;
-      padding: 0 20px;
-    }
-
-    /* Header */
-    header {
-      background: linear-gradient(135deg, var(--primary-color), var(--secondary-color));
-      color: white;
-      padding: 2rem 0;
-      position: relative;
-      overflow: hidden;
-    }
-
-    header::before {
-      content: '';
-      position: absolute;
-      top: 0;
-      left: 0;
-      right: 0;
-      bottom: 0;
-      background: url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 20"><defs><radialGradient id="a"><stop offset="20%" stop-color="%23ffffff" stop-opacity="0.1"/><stop offset="100%" stop-color="%23ffffff" stop-opacity="0"/></radialGradient></defs><circle fill="url(%23a)" cx="10" cy="10" r="10"/><circle fill="url(%23a)" cx="50" cy="15" r="8"/><circle fill="url(%23a)" cx="90" cy="5" r="12"/></svg>') repeat;
-      opacity: 0.3;
-      animation: float 20s infinite linear;
-    }
-
-    @keyframes float {
-      0% { transform: translateX(-100px); }
-      100% { transform: translateX(100px); }
-    }
-
-    .header-content {
-      position: relative;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      flex-wrap: wrap;
-      gap: 1rem;
-    }
-
-    .header-title {
-      display: flex;
-      align-items: center;
-      gap: 1rem;
-    }
-
-    .header-title h1 {
-      font-size: clamp(1.8rem, 4vw, 2.5rem);
-      font-weight: 700;
-      text-shadow: 0 2px 4px rgba(0,0,0,0.3);
-    }
-
-    .algeria-flag {
-      font-size: 2rem;
-      filter: drop-shadow(0 2px 4px rgba(0,0,0,0.3));
-    }
-
-    .header-controls {
-      display: flex;
-      gap: 1rem;
-      align-items: center;
-    }
-
-    .theme-toggle, .export-btn {
-      background: rgba(255,255,255,0.2);
-      border: none;
-      color: white;
-      padding: 0.7rem 1.2rem;
-      border-radius: 50px;
-      cursor: pointer;
-      transition: all 0.3s ease;
-      font-size: 0.9rem;
-      backdrop-filter: blur(10px);
-    }
-
-    .theme-toggle:hover, .export-btn:hover {
-      background: rgba(255,255,255,0.3);
-      transform: translateY(-2px);
-    }
-
-    /* Navigation */
-    nav {
-      background: var(--card-bg);
-      padding: 1rem 0;
-      border-bottom: 1px solid var(--border-color);
-      position: sticky;
-      top: 0;
-      z-index: 100;
-      backdrop-filter: blur(20px);
-      background: rgba(248, 249, 250, 0.95);
-    }
-
-    [data-theme="dark"] nav {
-      background: rgba(58, 58, 58, 0.95);
-    }
-
-    .nav-content {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      flex-wrap: wrap;
-      gap: 1rem;
-    }
-
-    .nav-tabs {
-      display: flex;
-      gap: 0.5rem;
-    }
-
-    .nav-tab {
-      padding: 0.7rem 1.5rem;
-      background: transparent;
-      border: none;
-      color: var(--text-secondary);
-      cursor: pointer;
-      border-radius: 25px;
-      transition: all 0.3s ease;
-      font-weight: 500;
-    }
-
-    .nav-tab.active {
-      background: var(--primary-color);
-      color: white;
-      transform: translateY(-2px);
-      box-shadow: 0 4px 12px rgba(255, 102, 170, 0.3);
-    }
-
-    .nav-tab:hover:not(.active) {
-      background: var(--accent-color);
-      color: var(--text-primary);
-    }
-
-    /* Search and Filters */
-    .search-filters {
-      background: var(--card-bg);
-      padding: 2rem 0;
-      border-bottom: 1px solid var(--border-color);
-    }
-
-    .filters-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-      gap: 1rem;
-      margin-bottom: 1rem;
-    }
-
-    .filter-group {
-      position: relative;
-    }
-
-    .filter-group label {
-      display: block;
-      margin-bottom: 0.5rem;
-      font-weight: 600;
-      color: var(--text-primary);
-    }
-
-    .filter-input, .filter-select {
-      width: 100%;
-      padding: 0.8rem 1rem;
-      border: 2px solid var(--border-color);
-      border-radius: 12px;
-      background: var(--light-bg);
-      color: var(--text-primary);
-      font-size: 0.9rem;
-      transition: all 0.3s ease;
-    }
-
-    .filter-input:focus, .filter-select:focus {
-      outline: none;
-      border-color: var(--primary-color);
-      box-shadow: 0 0 0 3px rgba(255, 102, 170, 0.1);
-    }
-
-    .filter-input::placeholder {
-      color: var(--text-secondary);
-    }
-
-    .search-icon {
-      position: absolute;
-      right: 1rem;
-      top: 50%;
-      transform: translateY(-50%);
-      color: var(--text-secondary);
-      pointer-events: none;
-    }
-
-    .advanced-filters {
-      display: none;
-      margin-top: 1rem;
-      padding-top: 1rem;
-      border-top: 1px solid var(--border-color);
-    }
-
-    .advanced-filters.show {
-      display: block;
-      animation: slideDown 0.3s ease;
-    }
-
-    @keyframes slideDown {
-      from { opacity: 0; transform: translateY(-10px); }
-      to { opacity: 1; transform: translateY(0); }
-    }
-
-    .toggle-filters {
-      background: none;
-      border: none;
-      color: var(--primary-color);
-      cursor: pointer;
-      font-weight: 500;
-      display: flex;
-      align-items: center;
-      gap: 0.5rem;
-      transition: all 0.3s ease;
-    }
-
-    .toggle-filters:hover {
-      color: var(--secondary-color);
-    }
-
-    /* Progress Bar */
-    .progress-section {
-      background: var(--card-bg);
-      padding: 1.5rem 0;
-      border-bottom: 1px solid var(--border-color);
-    }
-
-    .progress-container {
-      background: var(--border-color);
-      height: 8px;
-      border-radius: 4px;
-      overflow: hidden;
-      margin: 1rem 0;
-      position: relative;
-    }
-
-    .progress-bar {
-      height: 100%;
-      background: linear-gradient(90deg, var(--primary-color), var(--secondary-color));
-      transition: width 0.5s ease;
-      position: relative;
-    }
-
-    .progress-bar::after {
-      content: '';
-      position: absolute;
-      top: 0;
-      left: 0;
-      bottom: 0;
-      right: 0;
-      background: linear-gradient(90deg, transparent, rgba(255,255,255,0.2), transparent);
-      animation: shimmer 2s infinite;
-    }
-
-    @keyframes shimmer {
-      0% { transform: translateX(-100%); }
-      100% { transform: translateX(100%); }
-    }
-
-    .progress-text {
-      text-align: center;
-      color: var(--text-secondary);
-      font-size: 0.9rem;
-    }
-
-    /* Main Content */
-    .main-content {
-      padding: 2rem 0;
-      min-height: 60vh;
-    }
-
-    /* Loading States */
-    .loading {
-      display: flex;
-      justify-content: center;
-      align-items: center;
-      padding: 4rem 0;
-      color: var(--text-secondary);
-    }
-
-    .loading i {
-      font-size: 2rem;
-      margin-right: 1rem;
-      animation: spin 1s linear infinite;
-    }
-
-    @keyframes spin {
-      from { transform: rotate(0deg); }
-      to { transform: rotate(360deg); }
-    }
-
-    /* Cards */
-    .card {
-      background: var(--light-bg);
-      border-radius: 16px;
-      padding: 1.5rem;
-      margin-bottom: 1.5rem;
-      box-shadow: var(--shadow);
-      border: 1px solid var(--border-color);
-      transition: all 0.3s ease;
-    }
-
-    .card:hover {
-      transform: translateY(-2px);
-      box-shadow: 0 8px 30px rgba(0,0,0,0.12);
-    }
-
-    .card-title {
-      font-size: 1.3rem;
-      font-weight: 600;
-      margin-bottom: 1rem;
-      color: var(--text-primary);
-    }
-
-    /* Stats Cards */
-    .stats-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-      gap: 1rem;
-      margin-bottom: 2rem;
-    }
-
-    .stat-card {
-      background: linear-gradient(135deg, var(--primary-color), var(--secondary-color));
-      color: white;
-      text-align: center;
-      padding: 2rem 1rem;
-      border-radius: 16px;
-      position: relative;
-      overflow: hidden;
-    }
-
-    .stat-card::before {
-      content: '';
-      position: absolute;
-      top: 0;
-      left: 0;
-      right: 0;
-      bottom: 0;
-      background: radial-gradient(circle at 70% 30%, rgba(255,255,255,0.1), transparent);
-    }
-
-    .stat-value {
-      font-size: 2.5rem;
-      font-weight: 700;
-      margin-bottom: 0.5rem;
-      position: relative;
-    }
-
-    .stat-label {
-      font-size: 0.9rem;
-      opacity: 0.9;
-      position: relative;
-    }
-
-    /* Table Styles */
-    .table-container {
-      background: var(--light-bg);
-      border-radius: 16px;
-      overflow: hidden;
-      box-shadow: var(--shadow);
-      border: 1px solid var(--border-color);
-    }
-
-    .table-header {
-      background: var(--card-bg);
-      padding: 1rem 1.5rem;
-      border-bottom: 1px solid var(--border-color);
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      flex-wrap: wrap;
-      gap: 1rem;
-    }
-
-    .table-title {
-      font-weight: 600;
-      color: var(--text-primary);
-    }
-
-    .table-controls {
-      display: flex;
-      gap: 0.5rem;
-      align-items: center;
-    }
-
-    .sort-btn {
-      background: none;
-      border: 1px solid var(--border-color);
-      padding: 0.5rem 0.8rem;
-      border-radius: 8px;
-      cursor: pointer;
-      color: var(--text-secondary);
-      transition: all 0.3s ease;
-      font-size: 0.8rem;
-    }
-
-    .sort-btn.active {
-      background: var(--primary-color);
-      color: white;
-      border-color: var(--primary-color);
-    }
-
-    .sort-btn:hover:not(.active) {
-      background: var(--accent-color);
-      border-color: var(--primary-color);
-    }
-
-    table {
-      width: 100%;
-      border-collapse: collapse;
-    }
-
-    th, td {
-      padding: 1rem;
-      text-align: left;
-      border-bottom: 1px solid var(--border-color);
-    }
-
-    th {
-      background: var(--card-bg);
-      font-weight: 600;
-      color: var(--text-primary);
-      position: sticky;
-      top: 0;
-      z-index: 10;
-    }
-
-    tr:hover {
-      background: rgba(255, 102, 170, 0.05);
-    }
-
-    .rank {
-      font-weight: 700;
-      color: var(--primary-color);
-    }
-
-    .player-cell {
-      display: flex;
-      align-items: center;
-      gap: 0.8rem;
-    }
-
-    .flag {
-      width: 24px;
-      height: 16px;
-      border-radius: 3px;
-      box-shadow: 0 1px 3px rgba(0,0,0,0.2);
-    }
-
-    .username {
-      font-weight: 600;
-      color: var(--text-primary);
-      cursor: pointer;
-      transition: color 0.3s ease;
-    }
-
-    .username:hover {
-      color: var(--primary-color);
-    }
-
-    .beatmap-link {
-      color: var(--primary-color);
-      text-decoration: none;
-      font-weight: 500;
-      transition: all 0.3s ease;
-      display: block;
-      max-width: 300px;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-    }
-
-    .beatmap-link:hover {
-      color: var(--secondary-color);
-      text-decoration: underline;
-    }
-
-    .score {
-      font-weight: 700;
-      color: var(--success-color);
-    }
-
-    .accuracy {
-      font-weight: 600;
-      color: var(--warning-color);
-    }
-
-    .mods {
-      background: var(--accent-color);
-      color: var(--text-primary);
-      padding: 0.3rem 0.6rem;
-      border-radius: 12px;
-      font-size: 0.8rem;
-      font-weight: 600;
-    }
-
-    .pp-value {
-      color: var(--primary-color);
-      font-weight: 600;
-    }
-
-    .difficulty {
-      display: flex;
-      align-items: center;
-      gap: 0.3rem;
-    }
-
-    .difficulty-star {
-      color: var(--warning-color);
-    }
-
-    .timestamp {
-      color: var(--text-secondary);
-      font-size: 0.85rem;
-    }
-
-    /* Player Profile Modal */
-    .modal {
-      display: none;
-      position: fixed;
-      z-index: 1000;
-      left: 0;
-      top: 0;
-      width: 100%;
-      height: 100%;
-      background: rgba(0,0,0,0.5);
-      backdrop-filter: blur(5px);
-    }
-
-    .modal.show {
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      animation: fadeIn 0.3s ease;
-    }
-
-    @keyframes fadeIn {
-      from { opacity: 0; }
-      to { opacity: 1; }
-    }
-
-    .modal-content {
-      background: var(--light-bg);
-      border-radius: 20px;
-      padding: 2rem;
-      max-width: 600px;
-      width: 90%;
-      max-height: 80vh;
-      overflow-y: auto;
-      position: relative;
-      animation: slideUp 0.3s ease;
-    }
-
-    @keyframes slideUp {
-      from { transform: translateY(50px); opacity: 0; }
-      to { transform: translateY(0); opacity: 1; }
-    }
-
-    .modal-close {
-      position: absolute;
-      top: 1rem;
-      right: 1rem;
-      background: none;
-      border: none;
-      font-size: 1.5rem;
-      cursor: pointer;
-      color: var(--text-secondary);
-      transition: color 0.3s ease;
-    }
-
-    .modal-close:hover {
-      color: var(--danger-color);
-    }
-
-    .player-profile {
-      text-align: center;
-      margin-bottom: 2rem;
-    }
-
-    .player-avatar {
-      width: 100px;
-      height: 100px;
-      border-radius: 50%;
-      margin: 0 auto 1rem;
-      border: 4px solid var(--primary-color);
-      box-shadow: 0 4px 20px rgba(255, 102, 170, 0.3);
-    }
-
-    .player-name {
-      font-size: 1.5rem;
-      font-weight: 700;
-      color: var(--text-primary);
-      margin-bottom: 0.5rem;
-    }
-
-    .player-stats-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
-      gap: 1rem;
-      margin: 1rem 0;
-    }
-
-    .player-stat {
-      text-align: center;
-      padding: 1rem;
-      background: var(--card-bg);
-      border-radius: 12px;
-    }
-
-    .player-stat-value {
-      font-size: 1.2rem;
-      font-weight: 700;
-      color: var(--primary-color);
-    }
-
-    .player-stat-label {
-      font-size: 0.8rem;
-      color: var(--text-secondary);
-      margin-top: 0.3rem;
-    }
-
-    /* Recent Activity */
-    .activity-item {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      padding: 0.8rem;
-      background: var(--card-bg);
-      border-radius: 8px;
-      margin-bottom: 0.5rem;
-      border-left: 4px solid var(--primary-color);
-    }
-
-    .activity-content {
-      flex: 1;
-    }
-
-    .activity-title {
-      font-weight: 600;
-      color: var(--text-primary);
-      margin-bottom: 0.3rem;
-    }
-
-    .activity-meta {
-      font-size: 0.8rem;
-      color: var(--text-secondary);
-    }
-
-    .activity-time {
-      color: var(--text-secondary);
-      font-size: 0.8rem;
-    }
-
-    /* Responsive Design */
-    @media (max-width: 768px) {
-      .header-content {
-        text-align: center;
-      }
-      
-      .nav-content {
-        flex-direction: column;
-      }
-      
-      .filters-grid {
-        grid-template-columns: 1fr;
-      }
-      
-      .stats-grid {
-        grid-template-columns: repeat(2, 1fr);
-      }
-      
-      table {
-        font-size: 0.85rem;
-      }
-      
-      th, td {
-        padding: 0.7rem 0.5rem;
-      }
-      
-      .beatmap-link {
-        max-width: 200px;
-      }
-      
-      .modal-content {
-        width: 95%;
-        padding: 1.5rem;
-      }
-    }
-
-    /* Dark mode transitions */
-    * {
-      transition: background-color 0.3s ease, color 0.3s ease, border-color 0.3s ease;
-    }
-
-    /* Custom scrollbar */
-    ::-webkit-scrollbar {
-      width: 8px;
-    }
-
-    ::-webkit-scrollbar-track {
-      background: var(--border-color);
-      border-radius: 4px;
-    }
-
-    ::-webkit-scrollbar-thumb {
-      background: var(--primary-color);
-      border-radius: 4px;
-    }
-
-    ::-webkit-scrollbar-thumb:hover {
-      background: var(--secondary-color);
-    }
-
-    /* Animations for new content */
-    .fade-in {
-      animation: fadeInUp 0.5s ease forwards;
-    }
-
-    @keyframes fadeInUp {
-      from {
-        opacity: 0;
-        transform: translateY(20px);
-      }
-      to {
-        opacity: 1;
-        transform: translateY(0);
-      }
-    }
-
-    /* Empty state */
-    .empty-state {
-      text-align: center;
-      padding: 4rem 2rem;
-      color: var(--text-secondary);
-    }
-
-    .empty-state i {
-      font-size: 4rem;
-      margin-bottom: 1rem;
-      opacity: 0.5;
-    }
-
-    .empty-state h3 {
-      margin-bottom: 0.5rem;
-      color: var(--text-primary);
-    }
-  </style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>osu! Algeria Leaderboards 🇩🇿</title>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        :root {
+            --bg-primary: #0a0a0a;
+            --bg-secondary: #1a1a1a;
+            --bg-tertiary: #2a2a2a;
+            --accent-primary: #ff66aa;
+            --accent-secondary: #66aaff;
+            --text-primary: #ffffff;
+            --text-secondary: #cccccc;
+            --text-muted: #888888;
+            --border-color: #333333;
+            --success: #4ade80;
+            --warning: #f59e0b;
+            --error: #ef4444;
+            --gradient-primary: linear-gradient(135deg, #ff66aa, #66aaff);
+            --gradient-secondary: linear-gradient(135deg, #2a2a2a, #1a1a1a);
+            --shadow-primary: 0 8px 32px rgba(255, 102, 170, 0.2);
+            --shadow-secondary: 0 4px 16px rgba(0, 0, 0, 0.5);
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            line-height: 1.6;
+            overflow-x: hidden;
+        }
+
+        /* Animated background */
+        .bg-animation {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: -1;
+            overflow: hidden;
+        }
+
+        .bg-animation::before {
+            content: '';
+            position: absolute;
+            width: 200%;
+            height: 200%;
+            background: radial-gradient(circle at 20% 50%, rgba(255, 102, 170, 0.1) 0%, transparent 50%),
+                        radial-gradient(circle at 80% 20%, rgba(102, 170, 255, 0.1) 0%, transparent 50%);
+            animation: float 20s ease-in-out infinite;
+        }
+
+        @keyframes float {
+            0%, 100% { transform: translate(-10%, -10%) rotate(0deg); }
+            50% { transform: translate(-15%, -15%) rotate(180deg); }
+        }
+
+        /* Header */
+        .header {
+            background: var(--gradient-secondary);
+            padding: 1rem 0;
+            box-shadow: var(--shadow-secondary);
+            backdrop-filter: blur(20px);
+            position: sticky;
+            top: 0;
+            z-index: 100;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .header-content {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 0 2rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .logo {
+            font-size: 1.8rem;
+            font-weight: bold;
+            background: var(--gradient-primary);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .nav {
+            display: flex;
+            gap: 2rem;
+            align-items: center;
+        }
+
+        .nav-item {
+            color: var(--text-secondary);
+            text-decoration: none;
+            font-weight: 500;
+            transition: all 0.3s ease;
+            padding: 0.5rem 1rem;
+            border-radius: 8px;
+            position: relative;
+        }
+
+        .nav-item:hover, .nav-item.active {
+            color: var(--accent-primary);
+            background: rgba(255, 102, 170, 0.1);
+        }
+
+        .search-container {
+            position: relative;
+        }
+
+        .search-input {
+            background: var(--bg-tertiary);
+            border: 2px solid var(--border-color);
+            border-radius: 12px;
+            padding: 0.75rem 3rem 0.75rem 1rem;
+            color: var(--text-primary);
+            width: 300px;
+            transition: all 0.3s ease;
+        }
+
+        .search-input:focus {
+            outline: none;
+            border-color: var(--accent-primary);
+            box-shadow: 0 0 20px rgba(255, 102, 170, 0.3);
+        }
+
+        .search-btn {
+            position: absolute;
+            right: 0.5rem;
+            top: 50%;
+            transform: translateY(-50%);
+            background: var(--gradient-primary);
+            border: none;
+            padding: 0.5rem;
+            border-radius: 8px;
+            color: white;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .search-btn:hover {
+            transform: translateY(-50%) scale(1.1);
+        }
+
+        /* Main content */
+        .main {
+            max-width: 1200px;
+            margin: 2rem auto;
+            padding: 0 2rem;
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 2rem;
+            margin-bottom: 3rem;
+        }
+
+        .stat-card {
+            background: var(--gradient-secondary);
+            padding: 2rem;
+            border-radius: 16px;
+            border: 1px solid var(--border-color);
+            text-align: center;
+            transition: all 0.3s ease;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .stat-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: -100%;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(90deg, transparent, rgba(255, 102, 170, 0.1), transparent);
+            transition: left 0.5s ease;
+        }
+
+        .stat-card:hover::before {
+            left: 100%;
+        }
+
+        .stat-card:hover {
+            transform: translateY(-5px);
+            box-shadow: var(--shadow-primary);
+            border-color: var(--accent-primary);
+        }
+
+        .stat-icon {
+            font-size: 3rem;
+            margin-bottom: 1rem;
+            background: var(--gradient-primary);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .stat-value {
+            font-size: 2.5rem;
+            font-weight: bold;
+            color: var(--text-primary);
+            margin-bottom: 0.5rem;
+        }
+
+        .stat-label {
+            color: var(--text-muted);
+            text-transform: uppercase;
+            font-size: 0.9rem;
+            letter-spacing: 1px;
+        }
+
+        /* Tabs */
+        .tabs {
+            display: flex;
+            gap: 1rem;
+            margin-bottom: 2rem;
+            flex-wrap: wrap;
+        }
+
+        .tab {
+            background: var(--bg-tertiary);
+            border: 2px solid var(--border-color);
+            padding: 0.75rem 1.5rem;
+            border-radius: 12px;
+            cursor: pointer;
+            color: var(--text-secondary);
+            font-weight: 500;
+            transition: all 0.3s ease;
+            position: relative;
+        }
+
+        .tab.active {
+            background: var(--gradient-primary);
+            border-color: var(--accent-primary);
+            color: white;
+            box-shadow: var(--shadow-primary);
+        }
+
+        .tab:hover:not(.active) {
+            border-color: var(--accent-secondary);
+            color: var(--accent-secondary);
+        }
+
+        /* Filters */
+        .filters {
+            background: var(--bg-secondary);
+            padding: 1.5rem;
+            border-radius: 16px;
+            margin-bottom: 2rem;
+            border: 1px solid var(--border-color);
+        }
+
+        .filter-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 1rem;
+            align-items: end;
+        }
+
+        .filter-group {
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+        }
+
+        .filter-label {
+            font-size: 0.9rem;
+            color: var(--text-muted);
+            font-weight: 500;
+        }
+
+        .filter-select, .filter-input {
+            background: var(--bg-tertiary);
+            border: 2px solid var(--border-color);
+            border-radius: 8px;
+            padding: 0.75rem;
+            color: var(--text-primary);
+            transition: all 0.3s ease;
+        }
+
+        .filter-select:focus, .filter-input:focus {
+            outline: none;
+            border-color: var(--accent-primary);
+        }
+
+        /* Leaderboard table */
+        .leaderboard {
+            background: var(--bg-secondary);
+            border-radius: 16px;
+            overflow: hidden;
+            box-shadow: var(--shadow-secondary);
+            border: 1px solid var(--border-color);
+        }
+
+        .leaderboard-header {
+            background: var(--gradient-primary);
+            padding: 1.5rem 2rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .leaderboard-title {
+            font-size: 1.5rem;
+            font-weight: bold;
+            color: white;
+        }
+
+        .refresh-btn {
+            background: rgba(255, 255, 255, 0.2);
+            border: none;
+            padding: 0.5rem 1rem;
+            border-radius: 8px;
+            color: white;
+            cursor: pointer;
+            font-weight: 500;
+            transition: all 0.3s ease;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .refresh-btn:hover {
+            background: rgba(255, 255, 255, 0.3);
+            transform: scale(1.05);
+        }
+
+        .refresh-btn.loading {
+            opacity: 0.7;
+            pointer-events: none;
+        }
+
+        .refresh-btn.loading .fa-sync {
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        .table thead {
+            background: var(--bg-tertiary);
+        }
+
+        .table th {
+            padding: 1rem;
+            text-align: left;
+            font-weight: 600;
+            color: var(--text-secondary);
+            border-bottom: 1px solid var(--border-color);
+            cursor: pointer;
+            transition: all 0.3s ease;
+            position: relative;
+        }
+
+        .table th:hover {
+            background: rgba(255, 102, 170, 0.1);
+            color: var(--accent-primary);
+        }
+
+        .table td {
+            padding: 1rem;
+            border-bottom: 1px solid var(--border-color);
+            transition: all 0.3s ease;
+        }
+
+        .table tbody tr {
+            transition: all 0.3s ease;
+        }
+
+        .table tbody tr:hover {
+            background: rgba(255, 102, 170, 0.05);
+        }
+
+        /* Special rank styling */
+        .rank-1 {
+            background: linear-gradient(135deg, rgba(255, 215, 0, 0.2), rgba(255, 215, 0, 0.1));
+            border-left: 4px solid gold;
+        }
+
+        .rank-2 {
+            background: linear-gradient(135deg, rgba(192, 192, 192, 0.2), rgba(192, 192, 192, 0.1));
+            border-left: 4px solid silver;
+        }
+
+        .rank-3 {
+            background: linear-gradient(135deg, rgba(205, 127, 50, 0.2), rgba(205, 127, 50, 0.1));
+            border-left: 4px solid #cd7f32;
+        }
+
+        .player-avatar {
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            margin-right: 0.5rem;
+        }
+
+        .player-info {
+            display: flex;
+            align-items: center;
+        }
+
+        .player-name {
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+
+        .mods {
+            display: flex;
+            gap: 0.25rem;
+        }
+
+        .mod {
+            background: var(--accent-primary);
+            color: white;
+            padding: 0.2rem 0.4rem;
+            border-radius: 4px;
+            font-size: 0.7rem;
+            font-weight: bold;
+        }
+
+        .score-value {
+            font-family: 'Courier New', monospace;
+            font-weight: bold;
+        }
+
+        .accuracy {
+            color: var(--success);
+            font-weight: 600;
+        }
+
+        .pp-value {
+            color: var(--accent-secondary);
+            font-weight: bold;
+        }
+
+        /* Pagination */
+        .pagination {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 1rem;
+            margin-top: 2rem;
+        }
+
+        .pagination button {
+            background: var(--bg-tertiary);
+            border: 2px solid var(--border-color);
+            padding: 0.5rem 1rem;
+            border-radius: 8px;
+            color: var(--text-primary);
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .pagination button:hover:not(:disabled) {
+            border-color: var(--accent-primary);
+            color: var(--accent-primary);
+        }
+
+        .pagination button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .pagination button.active {
+            background: var(--gradient-primary);
+            border-color: var(--accent-primary);
+            color: white;
+        }
+
+        /* Loading states */
+        .loading {
+            text-align: center;
+            padding: 3rem;
+            color: var(--text-muted);
+        }
+
+        .loading-spinner {
+            display: inline-block;
+            width: 2rem;
+            height: 2rem;
+            border: 3px solid var(--border-color);
+            border-top: 3px solid var(--accent-primary);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-bottom: 1rem;
+        }
+
+        /* Connection status */
+        .connection-status {
+            position: fixed;
+            top: 1rem;
+            right: 1rem;
+            padding: 0.5rem 1rem;
+            border-radius: 8px;
+            font-size: 0.9rem;
+            font-weight: 500;
+            z-index: 1000;
+            transition: all 0.3s ease;
+        }
+
+        .connection-status.connected {
+            background: var(--success);
+            color: white;
+        }
+
+        .connection-status.disconnected {
+            background: var(--error);
+            color: white;
+        }
+
+        /* Responsive design */
+        @media (max-width: 768px) {
+            .header-content {
+                flex-direction: column;
+                gap: 1rem;
+                padding: 0 1rem;
+            }
+
+            .nav {
+                flex-wrap: wrap;
+                justify-content: center;
+            }
+
+            .search-input {
+                width: 250px;
+            }
+
+            .main {
+                padding: 0 1rem;
+            }
+
+            .stats-grid {
+                grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            }
+
+            .table {
+                font-size: 0.9rem;
+            }
+
+            .table th, .table td {
+                padding: 0.75rem 0.5rem;
+            }
+
+            .filter-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        /* Animations */
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        @keyframes slideIn {
+            from { transform: translateX(-100%); }
+            to { transform: translateX(0); }
+        }
+
+        .fade-in {
+            animation: fadeIn 0.6s ease-out;
+        }
+
+        .slide-in {
+            animation: slideIn 0.4s ease-out;
+        }
+
+        /* Tooltip */
+        .tooltip {
+            position: relative;
+            cursor: help;
+        }
+
+        .tooltip::after {
+            content: attr(data-tooltip);
+            position: absolute;
+            bottom: 100%;
+            left: 50%;
+            transform: translateX(-50%);
+            background: var(--bg-tertiary);
+            color: var(--text-primary);
+            padding: 0.5rem;
+            border-radius: 8px;
+            font-size: 0.8rem;
+            white-space: nowrap;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.3s ease;
+            border: 1px solid var(--border-color);
+            z-index: 1000;
+        }
+
+        .tooltip:hover::after {
+            opacity: 1;
+        }
+
+        /* Notification toast */
+        .toast {
+            position: fixed;
+            top: 5rem;
+            right: 1rem;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            padding: 1rem;
+            color: var(--text-primary);
+            z-index: 1000;
+            transform: translateX(400px);
+            transition: transform 0.3s ease;
+            box-shadow: var(--shadow-secondary);
+            min-width: 300px;
+        }
+
+        .toast.show {
+            transform: translateX(0);
+        }
+
+        .toast.success {
+            border-color: var(--success);
+            background: linear-gradient(135deg, rgba(74, 222, 128, 0.1), rgba(74, 222, 128, 0.05));
+        }
+
+        .toast.error {
+            border-color: var(--error);
+            background: linear-gradient(135deg, rgba(239, 68, 68, 0.1), rgba(239, 68, 68, 0.05));
+        }
+    </style>
 </head>
-<body data-theme="light">
-  <!-- Header -->
-  <header>
-    <div class="container">
-      <div class="header-content">
-        <div class="header-title">
-          <span class="algeria-flag">🇩🇿</span>
-          <h1>osu! Algeria Leaderboard</h1>
-        </div>
-        <div class="header-controls">
-          <button class="export-btn" onclick="exportData()">
-            <i class="fas fa-download"></i> Export
-          </button>
-          <button class="theme-toggle" onclick="toggleTheme()">
-            <i class="fas fa-moon"></i> Dark
-          </button>
-        </div>
-      </div>
+<body>
+    <div class="bg-animation"></div>
+    
+    <!-- Connection Status -->
+    <div class="connection-status" id="connectionStatus">
+        <i class="fas fa-wifi"></i> Connecting...
     </div>
-  </header>
 
-  <!-- Navigation -->
-  <nav>
-    <div class="container">
-      <div class="nav-content">
-        <div class="nav-tabs">
-          <button class="nav-tab active" data-tab="leaderboard">
-            <i class="fas fa-trophy"></i> Leaderboard
-          </button>
-          <button class="nav-tab" data-tab="players">
-            <i class="fas fa-users"></i> Top Players
-          </button>
-          <button class="nav-tab" data-tab="activity">
-            <i class="fas fa-clock"></i> Recent Activity
-          </button>
-          <button class="nav-tab" data-tab="stats">
-            <i class="fas fa-chart-bar"></i> Statistics
-          </button>
-        </div>
-      </div>
-    </div>
-  </nav>
-
-  <!-- Progress Section -->
-  <div class="progress-section">
-    <div class="container">
-      <div class="progress-container">
-        <div class="progress-bar" id="progressBar" style="width: 0%"></div>
-      </div>
-      <div class="progress-text" id="progressText">Loading scan progress...</div>
-    </div>
-  </div>
-
-  <!-- Search and Filters -->
-  <div class="search-filters">
-    <div class="container">
-      <div class="filters-grid">
-        <div class="filter-group">
-          <label for="playerSearch">Search Player</label>
-          <div style="position: relative;">
-            <input type="text" id="playerSearch" class="filter-input" placeholder="Enter username...">
-            <i class="fas fa-search search-icon"></i>
-          </div>
-        </div>
-        <div class="filter-group">
-          <label for="sortSelect">Sort By</label>
-          <select id="sortSelect" class="filter-select">
-            <option value="score">Highest Score</option>
-            <option value="rank">Best Rank</option>
-            <option value="pp">Performance Points</option>
-            <option value="last_updated">Recently Updated</option>
-            <option value="difficulty_rating">Difficulty</option>
-          </select>
-        </div>
-        <div class="filter-group">
-          <label for="modsFilter">Mods</label>
-          <select id="modsFilter" class="filter-select">
-            <option value="all">All Mods</option>
-            <option value="None">No Mods</option>
-            <option value="HD">Hidden</option>
-            <option value="DT">Double Time</option>
-            <option value="HR">Hard Rock</option>
-            <option value="FL">Flashlight</option>
-            <option value="EZ">Easy</option>
-          </select>
-        </div>
-        <div class="filter-group">
-          <label for="limitSelect">Results Per Page</label>
-          <select id="limitSelect" class="filter-select">
-            <option value="50">50</option>
-            <option value="100" selected>100</option>
-            <option value="250">250</option>
-            <option value="500">500</option>
-          </select>
-        </div>
-      </div>
-      
-      <button class="toggle-filters" onclick="toggleAdvancedFilters()">
-        <i class="fas fa-sliders-h"></i> Advanced Filters
-        <i class="fas fa-chevron-down" id="filtersChevron"></i>
-      </button>
-      
-      <div class="advanced-filters" id="advancedFilters">
-        <div class="filters-grid">
-          <div class="filter-group">
-            <label for="minDifficulty">Minimum Difficulty (★)</label>
-            <input type="range" id="minDifficulty" min="0" max="10" step="0.1" value="0" class="filter-input">
-            <div id="difficultyValue">0.0★</div>
-          </div>
-          <div class="filter-group">
-            <label for="minScore">Minimum Score</label>
-            <input type="number" id="minScore" class="filter-input" placeholder="e.g. 1000000" min="0">
-          </div>
-          <div class="filter-group">
-            <label for="dateRange">Time Range</label>
-            <select id="dateRange" class="filter-select">
-              <option value="all">All Time</option>
-              <option value="24h">Last 24 Hours</option>
-              <option value="week">Last Week</option>
-              <option value="month">Last Month</option>
-            </select>
-          </div>
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <!-- Main Content -->
-  <main class="main-content">
-    <div class="container">
-      <!-- Statistics Cards -->
-      <div class="stats-grid" id="statsGrid">
-        <div class="stat-card">
-          <div class="stat-value" id="totalScores">0</div>
-          <div class="stat-label">Total Scores</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-value" id="totalBeatmaps">0</div>
-          <div class="stat-label">Beatmaps</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-value" id="totalPlayers">0</div>
-          <div class="stat-label">Players</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-value" id="topScore">0</div>
-          <div class="stat-label">Highest Score</div>
-        </div>
-      </div>
-
-      <!-- Tab Content -->
-      <div id="leaderboardTab" class="tab-content active">
-        <div class="table-container">
-          <div class="table-header">
-            <div class="table-title">
-              <i class="fas fa-trophy"></i> Algeria Top 50 Leaderboard
+    <!-- Header -->
+    <header class="header">
+        <div class="header-content">
+            <div class="logo">
+                <i class="fas fa-music"></i>
+                osu! Algeria 🇩🇿
             </div>
-            <div class="table-controls">
-              <button class="sort-btn" onclick="toggleSort('ASC')">
-                <i class="fas fa-sort-alpha-down"></i> ASC
-              </button>
-              <button class="sort-btn active" onclick="toggleSort('DESC')">
-                <i class="fas fa-sort-alpha-up"></i> DESC
-              </button>
-            </div>
-          </div>
-          <div id="loading" class="loading">
-            <i class="fas fa-spinner fa-spin"></i>
-            <span>Loading leaderboard...</span>
-          </div>
-          <table id="leaderboardTable" style="display: none;">
-            <thead>
-              <tr>
-                <th>Rank</th>
-                <th>Player</th>
-                <th>Beatmap</th>
-                <th>Score</th>
-                <th>Accuracy</th>
-                <th>PP</th>
-                <th>Mods</th>
-                <th>Difficulty</th>
-                <th>Date</th>
-              </tr>
-            </thead>
-            <tbody id="leaderboardBody"></tbody>
-          </table>
-          <div id="emptyState" class="empty-state" style="display: none;">
-            <i class="fas fa-search"></i>
-            <h3>No scores found</h3>
-            <p>Try adjusting your search criteria</p>
-          </div>
-        </div>
-      </div>
-
-      <div id="playersTab" class="tab-content" style="display: none;">
-        <div class="table-container">
-          <div class="table-header">
-            <div class="table-title">
-              <i class="fas fa-users"></i> Top Players
-            </div>
-          </div>
-          <table id="playersTable">
-            <thead>
-              <tr>
-                <th>Rank</th>
-                <th>Player</th>
-                <th>Total Scores</th>
-                <th>Average Rank</th>
-                <th>Best Score</th>
-                <th>#1 Places</th>
-              </tr>
-            </thead>
-            <tbody id="playersBody"></tbody>
-          </table>
-        </div>
-      </div>
-
-      <div id="activityTab" class="tab-content" style="display: none;">
-        <div class="card">
-          <div class="card-title">
-            <i class="fas fa-clock"></i> Recent Activity (Last 24h)
-          </div>
-          <div id="activityList"></div>
-        </div>
-      </div>
-
-      <div id="statsTab" class="tab-content" style="display: none;">
-        <div class="stats-grid">
-          <div class="card">
-            <div class="card-title">Database Statistics</div>
-            <div id="detailedStats"></div>
-          </div>
-          <div class="card">
-            <div class="card-title">Scan Performance</div>
-            <div id="scanMetrics"></div>
-          </div>
-        </div>
-      </div>
-    </div>
-  </main>
-
-  <!-- Player Profile Modal -->
-  <div id="playerModal" class="modal">
-    <div class="modal-content">
-      <button class="modal-close" onclick="closePlayerModal()">&times;</button>
-      <div class="player-profile">
-        <img id="playerAvatar" class="player-avatar" src="" alt="Player Avatar">
-        <div class="player-name" id="playerName">Player Name</div>
-        <div class="player-stats-grid" id="playerStatsGrid">
-          <div class="player-stat">
-            <div class="player-stat-value" id="playerTotalScores">0</div>
-            <div class="player-stat-label">Total Scores</div>
-          </div>
-          <div class="player-stat">
-            <div class="player-stat-value" id="playerAvgRank">0</div>
-            <div class="player-stat-label">Avg Rank</div>
-          </div>
-          <div class="player-stat">
-            <div class="player-stat-value" id="playerBestScore">0</div>
-            <div class="player-stat-label">Best Score</div>
-          </div>
-          <div class="player-stat">
-            <div class="player-stat-value" id="playerFirstPlaces">0</div>
-            <div class="player-stat-label">#1 Places</div>
-          </div>
-        </div>
-      </div>
-      <div class="card">
-        <div class="card-title">Recent Scores</div>
-        <div id="playerScores"></div>
-      </div>
-    </div>
-  </div>
-
-  <script>
-    // Global variables
-    let currentTab = 'leaderboard';
-    let currentSort = 'score';
-    let currentOrder = 'DESC';
-    let allScores = [];
-    let filteredScores = [];
-    let currentTheme = 'light';
-
-    // Initialize app
-    document.addEventListener('DOMContentLoaded', function() {
-      initializeApp();
-      setupEventListeners();
-    });
-
-    async function initializeApp() {
-      await Promise.all([
-        updateProgress(),
-        updateStats(),
-        loadLeaderboard(),
-        loadTopPlayers()
-      ]);
-      
-      // Auto-refresh data
-      setInterval(updateProgress, 10000);
-      setInterval(updateStats, 60000);
-      setInterval(() => {
-        if (currentTab === 'leaderboard') loadLeaderboard();
-      }, 120000);
-    }
-
-    function setupEventListeners() {
-      // Navigation tabs
-      document.querySelectorAll('.nav-tab').forEach(tab => {
-        tab.addEventListener('click', () => switchTab(tab.dataset.tab));
-      });
-
-      // Search and filters
-      document.getElementById('playerSearch').addEventListener('input', debounce(applyFilters, 300));
-      document.getElementById('sortSelect').addEventListener('change', handleSortChange);
-      document.getElementById('modsFilter').addEventListener('change', applyFilters);
-      document.getElementById('limitSelect').addEventListener('change', applyFilters);
-      document.getElementById('minDifficulty').addEventListener('input', handleDifficultyChange);
-      document.getElementById('minScore').addEventListener('input', debounce(applyFilters, 500));
-      document.getElementById('dateRange').addEventListener('change', applyFilters);
-
-      // Modal close on outside click
-      document.getElementById('playerModal').addEventListener('click', (e) => {
-        if (e.target.id === 'playerModal') closePlayerModal();
-      });
-    }
-
-    // Theme Management
-    function toggleTheme() {
-      currentTheme = currentTheme === 'light' ? 'dark' : 'light';
-      document.body.dataset.theme = currentTheme;
-      
-      const themeBtn = document.querySelector('.theme-toggle');
-      const icon = themeBtn.querySelector('i');
-      const text = themeBtn.querySelector('i').nextSibling;
-      
-      if (currentTheme === 'dark') {
-        icon.className = 'fas fa-sun';
-        themeBtn.innerHTML = '<i class="fas fa-sun"></i> Light';
-      } else {
-        icon.className = 'fas fa-moon';
-        themeBtn.innerHTML = '<i class="fas fa-moon"></i> Dark';
-      }
-      
-      localStorage.setItem('theme', currentTheme);
-    }
-
-    // Load saved theme
-    function loadSavedTheme() {
-      const saved = localStorage.getItem('theme');
-      if (saved && saved !== currentTheme) {
-        toggleTheme();
-      }
-    }
-
-    // Tab Management
-    function switchTab(tab) {
-      currentTab = tab;
-      
-      // Update nav tabs
-      document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'));
-      document.querySelector(`[data-tab="${tab}"]`).classList.add('active');
-      
-      // Update content
-      document.querySelectorAll('.tab-content').forEach(content => {
-        content.style.display = 'none';
-      });
-      document.getElementById(`${tab}Tab`).style.display = 'block';
-      
-      // Load data for specific tabs
-      switch(tab) {
-        case 'players':
-          loadTopPlayers();
-          break;
-        case 'activity':
-          loadRecentActivity();
-          break;
-        case 'stats':
-          loadDetailedStats();
-          break;
-      }
-    }
-
-    // Progress Updates
-    async function updateProgress() {
-      try {
-        const response = await fetch('/api/scan-progress');
-        const data = await response.json();
-        
-        const progressBar = document.getElementById('progressBar');
-        const progressText = document.getElementById('progressText');
-        
-        if (data.total > 0) {
-          progressBar.style.width = `${data.percentage}%`;
-          progressText.innerHTML = `
-            Scan Progress: <strong>${data.processed.toLocaleString()}</strong> / 
-            <strong>${data.total.toLocaleString()}</strong> beatmaps 
-            (<strong>${data.percentage}%</strong>)
-          `;
-        } else {
-          progressText.textContent = 'Initializing scan...';
-        }
-      } catch (error) {
-        console.error('Failed to update progress:', error);
-      }
-    }
-
-    // Statistics Updates
-    async function updateStats() {
-      try {
-        const response = await fetch('/api/stats');
-        const stats = await response.json();
-        
-        document.getElementById('totalScores').textContent = stats.totalScores.toLocaleString();
-        document.getElementById('totalBeatmaps').textContent = stats.totalBeatmaps.toLocaleString();
-        document.getElementById('totalPlayers').textContent = stats.totalPlayers.toLocaleString();
-        document.getElementById('topScore').textContent = formatScore(stats.topScore);
-      } catch (error) {
-        console.error('Failed to update stats:', error);
-      }
-    }
-
-    // Leaderboard Loading
-    async function loadLeaderboard() {
-      const loading = document.getElementById('loading');
-      const table = document.getElementById('leaderboardTable');
-      const emptyState = document.getElementById('emptyState');
-      
-      try {
-        loading.style.display = 'flex';
-        table.style.display = 'none';
-        emptyState.style.display = 'none';
-        
-        const params = new URLSearchParams({
-          sort: currentSort,
-          order: currentOrder,
-          limit: document.getElementById('limitSelect').value || 100
-        });
-        
-        const response = await fetch(`/api/algeria-top50?${params}`);
-        const scores = await response.json();
-        
-        allScores = scores;
-        applyFilters();
-        
-        loading.style.display = 'none';
-        
-      } catch (error) {
-        console.error('Failed to load leaderboard:', error);
-        loading.innerHTML = '<i class="fas fa-exclamation-triangle"></i> Failed to load data';
-      }
-    }
-
-    // Filter Application
-    function applyFilters() {
-      let filtered = [...allScores];
-      
-      // Player search
-      const playerSearch = document.getElementById('playerSearch').value.toLowerCase();
-      if (playerSearch) {
-        filtered = filtered.filter(score => 
-          score.username.toLowerCase().includes(playerSearch)
-        );
-      }
-      
-      // Mods filter
-      const modsFilter = document.getElementById('modsFilter').value;
-      if (modsFilter !== 'all') {
-        filtered = filtered.filter(score => {
-          if (modsFilter === 'None') {
-            return score.mods === 'None' || !score.mods;
-          }
-          return score.mods && score.mods.includes(modsFilter);
-        });
-      }
-      
-      // Difficulty filter
-      const minDifficulty = parseFloat(document.getElementById('minDifficulty').value);
-      if (minDifficulty > 0) {
-        filtered = filtered.filter(score => 
-          (score.difficulty_rating || 0) >= minDifficulty
-        );
-      }
-      
-      // Score filter
-      const minScore = parseInt(document.getElementById('minScore').value);
-      if (minScore > 0) {
-        filtered = filtered.filter(score => score.score >= minScore);
-      }
-      
-      // Date range filter
-      const dateRange = document.getElementById('dateRange').value;
-      if (dateRange !== 'all') {
-        const now = Date.now();
-        let cutoff;
-        
-        switch(dateRange) {
-          case '24h':
-            cutoff = now - (24 * 60 * 60 * 1000);
-            break;
-          case 'week':
-            cutoff = now - (7 * 24 * 60 * 60 * 1000);
-            break;
-          case 'month':
-            cutoff = now - (30 * 24 * 60 * 60 * 1000);
-            break;
-        }
-        
-        filtered = filtered.filter(score => score.last_updated > cutoff);
-      }
-      
-      filteredScores = filtered;
-      renderLeaderboard();
-    }
-
-    // Leaderboard Rendering
-    function renderLeaderboard() {
-      const tbody = document.getElementById('leaderboardBody');
-      const table = document.getElementById('leaderboardTable');
-      const emptyState = document.getElementById('emptyState');
-      
-      if (filteredScores.length === 0) {
-        table.style.display = 'none';
-        emptyState.style.display = 'block';
-        return;
-      }
-      
-      table.style.display = 'table';
-      emptyState.style.display = 'none';
-      
-      tbody.innerHTML = '';
-      
-      filteredScores.forEach((score, index) => {
-        const row = document.createElement('tr');
-        row.className = 'fade-in';
-        row.style.animationDelay = `${index * 0.05}s`;
-        
-        row.innerHTML = `
-          <td><span class="rank">#${score.rank}</span></td>
-          <td>
-            <div class="player-cell">
-              <img class="flag" src="https://osu.ppy.sh/images/flags/DZ.png" alt="Algeria">
-              <span class="username" onclick="openPlayerModal('${score.username}')">${score.username}</span>
-            </div>
-          </td>
-          <td>
-            <a href="https://osu.ppy.sh/beatmaps/${score.beatmap_id}" target="_blank" class="beatmap-link" title="${score.beatmap_title}">
-              ${score.beatmap_title}
-            </a>
-          </td>
-          <td><span class="score">${formatScore(score.score)}</span></td>
-          <td><span class="accuracy">${score.accuracy}</span></td>
-          <td><span class="pp-value">${score.pp ? Math.round(score.pp) + 'pp' : 'N/A'}</span></td>
-          <td><span class="mods">${score.mods || 'None'}</span></td>
-          <td>
-            <div class="difficulty">
-              <i class="fas fa-star difficulty-star"></i>
-              ${score.difficulty_rating ? score.difficulty_rating.toFixed(1) : 'N/A'}
-            </div>
-          </td>
-          <td><span class="timestamp">${formatDate(score.last_updated)}</span></td>
-        `;
-        
-        tbody.appendChild(row);
-      });
-    }
-
-    // Top Players Loading
-    async function loadTopPlayers() {
-      try {
-        const response = await fetch('/api/top-players?limit=50');
-        const players = await response.json();
-        
-        const tbody = document.getElementById('playersBody');
-        tbody.innerHTML = '';
-        
-        players.forEach((player, index) => {
-          const row = document.createElement('tr');
-          row.innerHTML = `
-            <td><span class="rank">#${index + 1}</span></td>
-            <td>
-              <div class="player-cell">
-                <img class="flag" src="https://osu.ppy.sh/images/flags/DZ.png" alt="Algeria">
-                <span class="username" onclick="openPlayerModal('${player.username}')">${player.username}</span>
-              </div>
-            </td>
-            <td>${player.total_scores}</td>
-            <td>${player.avg_rank}</td>
-            <td><span class="score">${formatScore(player.best_score)}</span></td>
-            <td><span class="rank">${player.first_places}</span></td>
-          `;
-          tbody.appendChild(row);
-        });
-      } catch (error) {
-        console.error('Failed to load top players:', error);
-      }
-    }
-
-    // Recent Activity Loading
-    async function loadRecentActivity() {
-      try {
-        const response = await fetch('/api/recent-activity?hours=24');
-        const activity = await response.json();
-        
-        const activityList = document.getElementById('activityList');
-        
-        if (activity.length === 0) {
-          activityList.innerHTML = '<div class="empty-state"><i class="fas fa-clock"></i><h3>No recent activity</h3></div>';
-          return;
-        }
-        
-        activityList.innerHTML = '';
-        
-        activity.forEach(item => {
-          const activityItem = document.createElement('div');
-          activityItem.className = 'activity-item fade-in';
-          
-          activityItem.innerHTML = `
-            <div class="activity-content">
-              <div class="activity-title">
-                <strong>${item.username}</strong> achieved rank #${item.rank}
-              </div>
-              <div class="activity-meta">
-                ${item.beatmap_title} • ${formatScore(item.score)} • ${item.accuracy}
-              </div>
-            </div>
-            <div class="activity-time">
-              ${formatTimeAgo(item.last_updated)}
-            </div>
-          `;
-          
-          activityList.appendChild(activityItem);
-        });
-      } catch (error) {
-        console.error('Failed to load recent activity:', error);
-      }
-    }
-
-    // Detailed Stats Loading
-    async function loadDetailedStats() {
-      try {
-        const [statsResponse, metricsResponse] = await Promise.all([
-          fetch('/api/stats'),
-          fetch('/api/scan-metrics')
-        ]);
-        
-        const stats = await statsResponse.json();
-        const metrics = await metricsResponse.json();
-        
-        // Update detailed stats
-        const detailedStats = document.getElementById('detailedStats');
-        detailedStats.innerHTML = `
-          <div class="player-stats-grid">
-            <div class="player-stat">
-              <div class="player-stat-value">${stats.totalScores.toLocaleString()}</div>
-              <div class="player-stat-label">Total Scores</div>
-            </div>
-            <div class="player-stat">
-              <div class="player-stat-value">${stats.totalBeatmaps.toLocaleString()}</div>
-              <div class="player-stat-label">Beatmaps</div>
-            </div>
-            <div class="player-stat">
-              <div class="player-stat-value">${stats.totalPlayers.toLocaleString()}</div>
-              <div class="player-stat-label">Players</div>
-            </div>
-            <div class="player-stat">
-              <div class="player-stat-value">${stats.lastUpdated ? formatTimeAgo(stats.lastUpdated) : 'Never'}</div>
-              <div class="player-stat-label">Last Update</div>
-            </div>
-          </div>
-        `;
-        
-        // Update scan metrics
-        const scanMetrics = document.getElementById('scanMetrics');
-        if (metrics.current) {
-          scanMetrics.innerHTML = `
-            <div class="player-stats-grid">
-              <div class="player-stat">
-                <div class="player-stat-value">${metrics.current.beatmapsScanned.toLocaleString()}</div>
-                <div class="player-stat-label">Scanned</div>
-              </div>
-              <div class="player-stat">
-                <div class="player-stat-value">${metrics.current.algerianScoresFound.toLocaleString()}</div>
-                <div class="player-stat-label">Scores Found</div>
-              </div>
-              <div class="player-stat">
-                <div class="player-stat-value">${metrics.current.runtimeMinutes}</div>
-                <div class="player-stat-label">Runtime (min)</div>
-              </div>
-              <div class="player-stat">
-                <div class="player-stat-value">${metrics.current.scoresPerMinute}</div>
-                <div class="player-stat-label">Scores/Min</div>
-              </div>
-            </div>
-          `;
-        }
-      } catch (error) {
-        console.error('Failed to load detailed stats:', error);
-      }
-    }
-
-    // Player Modal Management
-    async function openPlayerModal(username) {
-      const modal = document.getElementById('playerModal');
-      
-      try {
-        // Show modal immediately
-        modal.classList.add('show');
-        
-        // Load player stats
-        const [statsResponse, scoresResponse] = await Promise.all([
-          fetch(`/api/player-stats/${encodeURIComponent(username)}`),
-          fetch(`/api/player-scores?username=${encodeURIComponent(username)}`)
-        ]);
-        
-        if (!statsResponse.ok) {
-          throw new Error('Player not found');
-        }
-        
-        const stats = await statsResponse.json();
-        const scores = await scoresResponse.json();
-        
-        // Update modal content
-        document.getElementById('playerName').textContent = stats.username;
-        document.getElementById('playerAvatar').src = `https://a.ppy.sh/${stats.username}`;
-        document.getElementById('playerTotalScores').textContent = stats.total_scores;
-        document.getElementById('playerAvgRank').textContent = stats.avg_rank;
-        document.getElementById('playerBestScore').textContent = formatScore(stats.best_score);
-        document.getElementById('playerFirstPlaces').textContent = stats.first_places;
-        
-        // Update recent scores
-        const playerScores = document.getElementById('playerScores');
-        playerScores.innerHTML = '';
-        
-        scores.slice(0, 10).forEach(score => {
-          const scoreItem = document.createElement('div');
-          scoreItem.className = 'activity-item';
-          scoreItem.innerHTML = `
-            <div class="activity-content">
-              <div class="activity-title">
-                Rank #${score.rank} • ${formatScore(score.score)}
-              </div>
-              <div class="activity-meta">
-                <a href="https://osu.ppy.sh/beatmaps/${score.beatmap_id}" target="_blank" style="color: var(--primary-color);">
-                  ${score.beatmap_title}
+            
+            <nav class="nav">
+                <a href="#" class="nav-item active" data-tab="leaderboard">
+                    <i class="fas fa-trophy"></i> Leaderboard
                 </a>
-                • ${score.accuracy} • ${score.mods || 'No Mods'}
-              </div>
+                <a href="#" class="nav-item" data-tab="players">
+                    <i class="fas fa-users"></i> Players
+                </a>
+                <a href="#" class="nav-item" data-tab="analytics">
+                    <i class="fas fa-chart-line"></i> Analytics
+                </a>
+                <a href="#" class="nav-item" data-tab="skills">
+                    <i class="fas fa-brain"></i> Skills
+                </a>
+            </nav>
+            
+            <div class="search-container">
+                <input 
+                    type="text" 
+                    class="search-input" 
+                    placeholder="Search players or beatmaps..."
+                    id="searchInput"
+                >
+                <button class="search-btn" id="searchBtn">
+                    <i class="fas fa-search"></i>
+                </button>
             </div>
-            <div class="activity-time">
-              ${formatTimeAgo(score.last_updated)}
+        </div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="main">
+        <!-- Statistics Overview -->
+        <div class="stats-grid fade-in">
+            <div class="stat-card">
+                <div class="stat-icon">
+                    <i class="fas fa-users"></i>
+                </div>
+                <div class="stat-value" id="totalPlayers">-</div>
+                <div class="stat-label">Total Players</div>
             </div>
-          `;
-          playerScores.appendChild(scoreItem);
-        });
-        
-      } catch (error) {
-        console.error('Failed to load player data:', error);
-        document.getElementById('playerName').textContent = 'Player not found';
-      }
-    }
+            
+            <div class="stat-card">
+                <div class="stat-icon">
+                    <i class="fas fa-gamepad"></i>
+                </div>
+                <div class="stat-value" id="totalScores">-</div>
+                <div class="stat-label">Total Scores</div>
+            </div>
+            
+            <div class="stat-card">
+                <div class="stat-icon">
+                    <i class="fas fa-map"></i>
+                </div>
+                <div class="stat-value" id="totalBeatmaps">-</div>
+                <div class="stat-label">Beatmaps</div>
+            </div>
+            
+            <div class="stat-card">
+                <div class="stat-icon">
+                    <i class="fas fa-fire"></i>
+                </div>
+                <div class="stat-value" id="active24h">-</div>
+                <div class="stat-label">Active 24h</div>
+            </div>
+        </div>
 
-    function closePlayerModal() {
-      document.getElementById('playerModal').classList.remove('show');
-    }
+        <!-- Tab Content -->
+        <div class="tab-content">
+            <!-- Leaderboard Tab -->
+            <div class="tab-pane active" id="leaderboard-tab">
+                <!-- Filters -->
+                <div class="filters slide-in">
+                    <div class="filter-grid">
+                        <div class="filter-group">
+                            <label class="filter-label">Sort By</label>
+                            <select class="filter-select" id="sortBy">
+                                <option value="score">Score</option>
+                                <option value="pp">Performance Points</option>
+                                <option value="accuracy">Accuracy</option>
+                                <option value="last_updated">Recent</option>
+                            </select>
+                        </div>
+                        
+                        <div class="filter-group">
+                            <label class="filter-label">Mods</label>
+                            <select class="filter-select" id="modFilter">
+                                <option value="all">All Mods</option>
+                                <option value="None">No Mod</option>
+                                <option value="HD">Hidden</option>
+                                <option value="DT">Double Time</option>
+                                <option value="HR">Hard Rock</option>
+                                <option value="FL">Flashlight</option>
+                            </select>
+                        </div>
+                        
+                        <div class="filter-group">
+                            <label class="filter-label">Min Difficulty</label>
+                            <input type="number" class="filter-input" id="minDiff" placeholder="0.0" step="0.1" min="0" max="15">
+                        </div>
+                        
+                        <div class="filter-group">
+                            <label class="filter-label">Max Difficulty</label>
+                            <input type="number" class="filter-input" id="maxDiff" placeholder="15.0" step="0.1" min="0" max="15">
+                        </div>
+                        
+                        <div class="filter-group">
+                            <label class="filter-label">Player</label>
+                            <input type="text" class="filter-input" id="playerFilter" placeholder="Player name...">
+                        </div>
+                    </div>
+                </div>
 
-    // Advanced Filters Management
-    function toggleAdvancedFilters() {
-      const filters = document.getElementById('advancedFilters');
-      const chevron = document.getElementById('filtersChevron');
-      
-      if (filters.classList.contains('show')) {
-        filters.classList.remove('show');
-        chevron.style.transform = 'rotate(0deg)';
-      } else {
-        filters.classList.add('show');
-        chevron.style.transform = 'rotate(180deg)';
-      }
-    }
+                <!-- Leaderboard Table -->
+                <div class="leaderboard fade-in">
+                    <div class="leaderboard-header">
+                        <h2 class="leaderboard-title">
+                            <i class="fas fa-trophy"></i>
+                            Algeria Top Scores
+                        </h2>
+                        <button class="refresh-btn" id="refreshBtn">
+                            <i class="fas fa-sync"></i>
+                            Refresh
+                        </button>
+                    </div>
+                    
+                    <div class="table-container">
+                        <table class="table">
+                            <thead>
+                                <tr>
+                                    <th data-sort="rank">
+                                        <i class="fas fa-hashtag"></i> Rank
+                                    </th>
+                                    <th data-sort="username">
+                                        <i class="fas fa-user"></i> Player
+                                    </th>
+                                    <th data-sort="beatmap_title">
+                                        <i class="fas fa-music"></i> Beatmap
+                                    </th>
+                                    <th data-sort="score">
+                                        <i class="fas fa-star"></i> Score
+                                    </th>
+                                    <th data-sort="accuracy">
+                                        <i class="fas fa-bullseye"></i> Accuracy
+                                    </th>
+                                    <th data-sort="mods">
+                                        <i class="fas fa-puzzle-piece"></i> Mods
+                                    </th>
+                                    <th data-sort="pp">
+                                        <i class="fas fa-gem"></i> PP
+                                    </th>
+                                    <th data-sort="last_updated">
+                                        <i class="fas fa-clock"></i> Date
+                                    </th>
+                                </tr>
+                            </thead>
+                            <tbody id="leaderboardBody">
+                                <!-- Content will be loaded dynamically -->
+                            </tbody>
+                        </table>
+                        
+                        <div id="loadingIndicator" class="loading">
+                            <div class="loading-spinner"></div>
+                            <div>Loading leaderboard...</div>
+                        </div>
+                    </div>
+                </div>
 
-    // Event Handlers
-    function handleSortChange() {
-      const sortSelect = document.getElementById('sortSelect');
-      currentSort = sortSelect.value;
-      loadLeaderboard();
-    }
+                <!-- Pagination -->
+                <div class="pagination" id="pagination">
+                    <!-- Pagination buttons will be generated dynamically -->
+                </div>
+            </div>
 
-    function handleDifficultyChange() {
-      const slider = document.getElementById('minDifficulty');
-      const display = document.getElementById('difficultyValue');
-      display.textContent = `${parseFloat(slider.value).toFixed(1)}★`;
-      applyFilters();
-    }
+            <!-- Other tabs will be implemented similarly -->
+            <div class="tab-pane" id="players-tab">
+                <div class="loading">
+                    <div class="loading-spinner"></div>
+                    <div>Player rankings coming soon...</div>
+                </div>
+            </div>
+            
+            <div class="tab-pane" id="analytics-tab">
+                <div class="loading">
+                    <div class="loading-spinner"></div>
+                    <div>Analytics dashboard coming soon...</div>
+                </div>
+            </div>
+            
+            <div class="tab-pane" id="skills-tab">
+                <div class="loading">
+                    <div class="loading-spinner"></div>
+                    <div>Skill rankings coming soon...</div>
+                </div>
+            </div>
+        </div>
+    </main>
 
-    function toggleSort(order) {
-      currentOrder = order;
-      
-      // Update button states
-      document.querySelectorAll('.sort-btn').forEach(btn => btn.classList.remove('active'));
-      event.target.classList.add('active');
-      
-      loadLeaderboard();
-    }
+    <!-- Toast notifications -->
+    <div class="toast" id="toast">
+        <div class="toast-content"></div>
+    </div>
 
-    // Export Functionality
-    async function exportData() {
-      try {
-        const format = confirm('Export as CSV? (Cancel for JSON)') ? 'csv' : 'json';
-        const limit = prompt('How many records to export?', '1000');
-        
-        if (!limit) return;
-        
-        const url = `/api/export?format=${format}&limit=${limit}`;
-        const link = document.createElement('a');
-        link.href = url;
-        link.download = `algeria_scores.${format}`;
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-        
-      } catch (error) {
-        console.error('Export failed:', error);
-        alert('Export failed. Please try again.');
-      }
-    }
-
-    // Utility Functions
-    function formatScore(score) {
-      if (!score) return 'N/A';
-      return parseInt(score).toLocaleString();
-    }
-
-    function formatDate(timestamp) {
-      if (!timestamp) return 'N/A';
-      const date = new Date(parseInt(timestamp));
-      return date.toLocaleDateString() + ' ' + date.toLocaleTimeString();
-    }
-
-    function formatTimeAgo(timestamp) {
-      if (!timestamp) return 'Never';
-      
-      const now = Date.now();
-      const diff = now - parseInt(timestamp);
-      const minutes = Math.floor(diff / (1000 * 60));
-      const hours = Math.floor(diff / (1000 * 60 * 60));
-      const days = Math.floor(diff / (1000 * 60 * 60 * 24));
-      
-      if (days > 0) return `${days}d ago`;
-      if (hours > 0) return `${hours}h ago`;
-      if (minutes > 0) return `${minutes}m ago`;
-      return 'Just now';
-    }
-
-    function debounce(func, wait) {
-      let timeout;
-      return function executedFunction(...args) {
-        const later = () => {
-          clearTimeout(timeout);
-          func(...args);
+    <script>
+        // Application state
+        const state = {
+            currentTab: 'leaderboard',
+            currentPage: 1,
+            itemsPerPage: 50,
+            totalItems: 0,
+            filters: {
+                sort: 'score',
+                order: 'DESC',
+                mods: 'all',
+                minDifficulty: 0,
+                maxDifficulty: 15,
+                player: ''
+            },
+            websocket: null,
+            connected: false
         };
-        clearTimeout(timeout);
-        timeout = setTimeout(later, wait);
-      };
-    }
 
-    // Error Handling
-    window.addEventListener('error', function(e) {
-      console.error('Global error:', e.error);
-    });
+        // API configuration
+        const API_BASE = window.location.origin + '/api';
+        const WS_URL = `ws://${window.location.hostname}:8080`;
 
-    window.addEventListener('unhandledrejection', function(e) {
-      console.error('Unhandled promise rejection:', e.reason);
-    });
+        // Initialize the application
+        document.addEventListener('DOMContentLoaded', () => {
+            initializeApp();
+        });
 
-    // Load theme on startup
-    loadSavedTheme();
-
-    // Keyboard shortcuts
-    document.addEventListener('keydown', function(e) {
-      // Escape to close modal
-      if (e.key === 'Escape') {
-        closePlayerModal();
-      }
-      
-      // Ctrl/Cmd + K to focus search
-      if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
-        e.preventDefault();
-        document.getElementById('playerSearch').focus();
-      }
-      
-      // Tab navigation with numbers
-      if (e.altKey && e.key >= '1' && e.key <= '4') {
-        e.preventDefault();
-        const tabs = ['leaderboard', 'players', 'activity', 'stats'];
-        const tabIndex = parseInt(e.key) - 1;
-        if (tabs[tabIndex]) {
-          switchTab(tabs[tabIndex]);
+        async function initializeApp() {
+            console.log('🚀 Initializing osu! Algeria frontend...');
+            
+            // Setup event listeners
+            setupEventListeners();
+            
+            // Connect to WebSocket
+            connectWebSocket();
+            
+            // Load initial data
+            await loadOverviewStats();
+            await loadLeaderboard();
+            
+            console.log('✅ Application initialized successfully');
         }
-      }
-    });
 
-    // Touch/swipe support for mobile
-    let touchStartX = 0;
-    let touchStartY = 0;
-    
-    document.addEventListener('touchstart', function(e) {
-      touchStartX = e.touches[0].clientX;
-      touchStartY = e.touches[0].clientY;
-    });
-    
-    document.addEventListener('touchend', function(e) {
-      const touchEndX = e.changedTouches[0].clientX;
-      const touchEndY = e.changedTouches[0].clientY;
-      
-      const diffX = touchStartX - touchEndX;
-      const diffY = touchStartY - touchEndY;
-      
-      // Only handle horizontal swipes
-      if (Math.abs(diffX) > Math.abs(diffY) && Math.abs(diffX) > 50) {
-        const tabs = ['leaderboard', 'players', 'activity', 'stats'];
-        const currentIndex = tabs.indexOf(currentTab);
-        
-        if (diffX > 0 && currentIndex < tabs.length - 1) {
-          // Swipe left - next tab
-          switchTab(tabs[currentIndex + 1]);
-        } else if (diffX < 0 && currentIndex > 0) {
-          // Swipe right - previous tab
-          switchTab(tabs[currentIndex - 1]);
+        function setupEventListeners() {
+            // Tab navigation
+            document.querySelectorAll('.nav-item').forEach(item => {
+                item.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    const tab = e.currentTarget.dataset.tab;
+                    switchTab(tab);
+                });
+            });
+
+            // Filter changes
+            document.getElementById('sortBy').addEventListener('change', () => {
+                state.filters.sort = document.getElementById('sortBy').value;
+                state.currentPage = 1;
+                loadLeaderboard();
+            });
+
+            document.getElementById('modFilter').addEventListener('change', () => {
+                state.filters.mods = document.getElementById('modFilter').value;
+                state.currentPage = 1;
+                loadLeaderboard();
+            });
+
+            document.getElementById('minDiff').addEventListener('input', debounce(() => {
+                state.filters.minDifficulty = parseFloat(document.getElementById('minDiff').value) || 0;
+                state.currentPage = 1;
+                loadLeaderboard();
+            }, 500));
+
+            document.getElementById('maxDiff').addEventListener('input', debounce(() => {
+                state.filters.maxDifficulty = parseFloat(document.getElementById('maxDiff').value) || 15;
+                state.currentPage = 1;
+                loadLeaderboard();
+            }, 500));
+
+            document.getElementById('playerFilter').addEventListener('input', debounce(() => {
+                state.filters.player = document.getElementById('playerFilter').value;
+                state.currentPage = 1;
+                loadLeaderboard();
+            }, 500));
+
+            // Refresh button
+            document.getElementById('refreshBtn').addEventListener('click', () => {
+                refreshData();
+            });
+
+            // Search functionality
+            document.getElementById('searchBtn').addEventListener('click', () => {
+                performSearch();
+            });
+
+            document.getElementById('searchInput').addEventListener('keypress', (e) => {
+                if (e.key === 'Enter') {
+                    performSearch();
+                }
+            });
+
+            // Table sorting
+            document.querySelectorAll('th[data-sort]').forEach(header => {
+                header.addEventListener('click', () => {
+                    const sortField = header.dataset.sort;
+                    if (state.filters.sort === sortField) {
+                        state.filters.order = state.filters.order === 'DESC' ? 'ASC' : 'DESC';
+                    } else {
+                        state.filters.sort = sortField;
+                        state.filters.order = 'DESC';
+                    }
+                    state.currentPage = 1;
+                    loadLeaderboard();
+                });
+            });
         }
-      }
-    });
 
-    // Intersection Observer for animations
-    const observerOptions = {
-      threshold: 0.1,
-      rootMargin: '0px 0px -50px 0px'
-    };
+        function connectWebSocket() {
+            try {
+                state.websocket = new WebSocket(WS_URL);
+                
+                state.websocket.onopen = () => {
+                    console.log('🔌 WebSocket connected');
+                    state.connected = true;
+                    updateConnectionStatus();
+                    
+                    // Subscribe to updates
+                    state.websocket.send(JSON.stringify({
+                        type: 'subscribe',
+                        channels: ['all', 'leaderboard', 'scan_progress']
+                    }));
+                };
 
-    const observer = new IntersectionObserver(function(entries) {
-      entries.forEach(entry => {
-        if (entry.isIntersecting) {
-          entry.target.classList.add('fade-in');
+                state.websocket.onmessage = (event) => {
+                    const data = JSON.parse(event.data);
+                    handleWebSocketMessage(data);
+                };
+
+                state.websocket.onclose = () => {
+                    console.log('🔌 WebSocket disconnected');
+                    state.connected = false;
+                    updateConnectionStatus();
+                    
+                    // Attempt to reconnect after 5 seconds
+                    setTimeout(connectWebSocket, 5000);
+                };
+
+                state.websocket.onerror = (error) => {
+                    console.error('WebSocket error:', error);
+                    state.connected = false;
+                    updateConnectionStatus();
+                };
+            } catch (error) {
+                console.error('Failed to connect WebSocket:', error);
+                state.connected = false;
+                updateConnectionStatus();
+            }
         }
-      });
-    }, observerOptions);
 
-    // Observe elements for animation
-    function observeElements() {
-      document.querySelectorAll('.card, .stat-card, tr').forEach(el => {
-        observer.observe(el);
-      });
-    }
-
-    // Performance monitoring
-    let performanceMetrics = {
-      apiCalls: 0,
-      loadTimes: [],
-      errors: 0
-    };
-
-    function trackPerformance(operation, startTime) {
-      const endTime = performance.now();
-      const duration = endTime - startTime;
-      
-      performanceMetrics.apiCalls++;
-      performanceMetrics.loadTimes.push(duration);
-      
-      if (duration > 2000) {
-        console.warn(`Slow operation detected: ${operation} took ${duration.toFixed(2)}ms`);
-      }
-    }
-
-    // Enhanced error handling with user feedback
-    function handleError(error, context) {
-      performanceMetrics.errors++;
-      console.error(`Error in ${context}:`, error);
-      
-      // Show user-friendly error message
-      const errorDiv = document.createElement('div');
-      errorDiv.className = 'error-toast';
-      errorDiv.innerHTML = `
-        <i class="fas fa-exclamation-triangle"></i>
-        <span>Something went wrong. Please try again.</span>
-        <button onclick="this.parentElement.remove()">×</button>
-      `;
-      
-      errorDiv.style.cssText = `
-        position: fixed;
-        top: 20px;
-        right: 20px;
-        background: var(--danger-color);
-        color: white;
-        padding: 1rem;
-        border-radius: 8px;
-        display: flex;
-        align-items: center;
-        gap: 0.5rem;
-        z-index: 1001;
-        animation: slideIn 0.3s ease;
-      `;
-      
-      document.body.appendChild(errorDiv);
-      
-      // Auto remove after 5 seconds
-      setTimeout(() => {
-        if (errorDiv.parentElement) {
-          errorDiv.remove();
+        function handleWebSocketMessage(data) {
+            console.log('📨 WebSocket message:', data);
+            
+            switch (data.type) {
+                case 'new_scores':
+                    showToast(`New scores added for ${data.beatmapTitle}!`, 'success');
+                    if (state.currentTab === 'leaderboard') {
+                        loadLeaderboard();
+                    }
+                    break;
+                    
+                case 'scan_progress':
+                    updateScanProgress(data.progress);
+                    break;
+                    
+                case 'scan_complete':
+                    showToast('Leaderboard scan completed!', 'success');
+                    if (state.currentTab === 'leaderboard') {
+                        loadLeaderboard();
+                    }
+                    loadOverviewStats();
+                    break;
+                    
+                case 'scan_error':
+                    showToast(`Scan error: ${data.error}`, 'error');
+                    break;
+                    
+                case 'subscribed':
+                    console.log('✅ Subscribed to channels:', data.channels);
+                    break;
+            }
         }
-      }, 5000);
-    }
 
-    // Service Worker registration for offline support (if available)
-    if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('/sw.js').catch(err => {
-        console.log('Service Worker registration failed:', err);
-      });
-    }
+        function updateConnectionStatus() {
+            const statusEl = document.getElementById('connectionStatus');
+            if (state.connected) {
+                statusEl.className = 'connection-status connected';
+                statusEl.innerHTML = '<i class="fas fa-wifi"></i> Connected';
+            } else {
+                statusEl.className = 'connection-status disconnected';
+                statusEl.innerHTML = '<i class="fas fa-wifi"></i> Disconnected';
+            }
+        }
 
-    // Print styles
-    const printStyles = `
-      @media print {
-        body * { visibility: hidden; }
-        .table-container, .table-container * { visibility: visible; }
-        .table-container { position: absolute; left: 0; top: 0; }
-        .table-header { display: none; }
-        nav, header, .search-filters, .progress-section { display: none; }
-      }
-    `;
-    
-    const styleSheet = document.createElement('style');
-    styleSheet.textContent = printStyles;
-    document.head.appendChild(styleSheet);
+        function switchTab(tab) {
+            // Update nav items
+            document.querySelectorAll('.nav-item').forEach(item => {
+                item.classList.toggle('active', item.dataset.tab === tab);
+            });
 
-    // Accessibility improvements
-    document.addEventListener('keydown', function(e) {
-      // Tab navigation accessibility
-      if (e.key === 'Tab') {
-        document.body.classList.add('keyboard-navigation');
-      }
-    });
+            // Update tab panes
+            document.querySelectorAll('.tab-pane').forEach(pane => {
+                pane.classList.toggle('active', pane.id === `${tab}-tab`);
+            });
 
-    document.addEventListener('mousedown', function(e) {
-      document.body.classList.remove('keyboard-navigation');
-    });
+            state.currentTab = tab;
 
-    // Add focus styles for keyboard navigation
-    const focusStyles = `
-      .keyboard-navigation button:focus,
-      .keyboard-navigation input:focus,
-      .keyboard-navigation select:focus,
-      .keyboard-navigation .nav-tab:focus {
-        outline: 2px solid var(--primary-color);
-        outline-offset: 2px;
-      }
-    `;
-    
-    const focusStyleSheet = document.createElement('style');
-    focusStyleSheet.textContent = focusStyles;
-    document.head.appendChild(focusStyleSheet);
+            // Load tab-specific data
+            switch (tab) {
+                case 'leaderboard':
+                    loadLeaderboard();
+                    break;
+                case 'players':
+                    loadPlayerRankings();
+                    break;
+                case 'analytics':
+                    loadAnalytics();
+                    break;
+                case 'skills':
+                    loadSkillRankings();
+                    break;
+            }
+        }
 
-    // Console credits
-    console.log('%c🇩🇿 osu! Algeria Leaderboard', 'color: #ff66aa; font-size: 20px; font-weight: bold;');
-    console.log('%cEnhanced by Advanced Frontend Features', 'color: #666; font-size: 12px;');
-    console.log('%cKeyboard shortcuts:\n- Esc: Close modal\n- Ctrl/Cmd + K: Focus search\n- Alt + 1-4: Switch tabs', 'color: #999; font-size: 11px;');
-  </script>
+        async function loadOverviewStats() {
+            try {
+                const response = await fetch(`${API_BASE}/analytics/overview`);
+                const result = await response.json();
+                
+                if (result.success) {
+                    const stats = result.data.totalStats;
+                    document.getElementById('totalPlayers').textContent = formatNumber(stats.total_players);
+                    document.getElementById('totalScores').textContent = formatNumber(stats.total_scores);
+                    document.getElementById('totalBeatmaps').textContent = formatNumber(stats.total_beatmaps);
+                    document.getElementById('active24h').textContent = formatNumber(stats.active24h);
+                }
+            } catch (error) {
+                console.error('Failed to load overview stats:', error);
+            }
+        }
+
+        async function loadLeaderboard() {
+            const loadingEl = document.getElementById('loadingIndicator');
+            const tableBody = document.getElementById('leaderboardBody');
+            
+            loadingEl.style.display = 'block';
+            tableBody.innerHTML = '';
+
+            try {
+                const params = new URLSearchParams({
+                    limit: state.itemsPerPage,
+                    offset: (state.currentPage - 1) * state.itemsPerPage,
+                    sort: state.filters.sort,
+                    order: state.filters.order,
+                    minDifficulty: state.filters.minDifficulty,
+                    maxDifficulty: state.filters.maxDifficulty
+                });
+
+                if (state.filters.mods !== 'all') {
+                    params.append('mods', state.filters.mods);
+                }
+                
+                if (state.filters.player) {
+                    params.append('player', state.filters.player);
+                }
+
+                const response = await fetch(`${API_BASE}/leaderboards?${params}`);
+                const result = await response.json();
+
+                if (result.success) {
+                    renderLeaderboardTable(result.data);
+                    updatePagination(result.pagination);
+                } else {
+                    throw new Error(result.error || 'Failed to load leaderboard');
+                }
+            } catch (error) {
+                console.error('Failed to load leaderboard:', error);
+                showToast('Failed to load leaderboard data', 'error');
+                tableBody.innerHTML = '<tr><td colspan="8" style="text-align: center; padding: 2rem; color: var(--text-muted);">Failed to load data</td></tr>';
+            } finally {
+                loadingEl.style.display = 'none';
+            }
+        }
+
+        function renderLeaderboardTable(scores) {
+            const tableBody = document.getElementById('leaderboardBody');
+            
+            if (scores.length === 0) {
+                tableBody.innerHTML = '<tr><td colspan="8" style="text-align: center; padding: 2rem; color: var(--text-muted);">No scores found</td></tr>';
+                return;
+            }
+
+            const rows = scores.map((score, index) => {
+                const rankClass = getRankClass(score.rank);
+                const modsHtml = renderMods(score.mods);
+                const avatarUrl = `https://a.ppy.sh/${score.player_id}`;
+                
+                return `
+                    <tr class="${rankClass} fade-in" style="animation-delay: ${index * 0.05}s">
+                        <td>
+                            <div style="display: flex; align-items: center; gap: 0.5rem;">
+                                ${getRankIcon(score.rank)}
+                                <span class="rank-number">#${score.rank}</span>
+                            </div>
+                        </td>
+                        <td>
+                            <div class="player-info">
+                                <img src="${avatarUrl}" alt="${score.username}" class="player-avatar" onerror="this.src='https://via.placeholder.com/32x32/333/fff?text=?'">
+                                <span class="player-name">${escapeHtml(score.username)}</span>
+                            </div>
+                        </td>
+                        <td>
+                            <div class="beatmap-info">
+                                <div style="font-weight: 600; margin-bottom: 0.25rem;">
+                                    ${escapeHtml(score.beatmap_title)}
+                                </div>
+                                <div style="font-size: 0.8rem; color: var(--text-muted);">
+                                    ${score.artist ? escapeHtml(score.artist) : ''} 
+                                    ${score.difficulty_name ? `[${escapeHtml(score.difficulty_name)}]` : ''}
+                                </div>
+                                ${score.difficulty_rating ? `<div class="difficulty-badge" style="margin-top: 0.25rem;">★${score.difficulty_rating.toFixed(2)}</div>` : ''}
+                            </div>
+                        </td>
+                        <td class="score-value">${formatScore(score.score)}</td>
+                        <td class="accuracy">${formatAccuracy(score.accuracy)}</td>
+                        <td>${modsHtml}</td>
+                        <td class="pp-value">${score.pp ? score.pp.toFixed(0) + 'pp' : '-'}</td>
+                        <td class="tooltip" data-tooltip="${formatFullDate(score.last_updated)}">
+                            ${formatRelativeTime(score.last_updated)}
+                        </td>
+                    </tr>
+                `;
+            }).join('');
+
+            tableBody.innerHTML = rows;
+        }
+
+        function renderMods(modsString) {
+            if (!modsString || modsString === 'None') {
+                return '<span style="color: var(--text-muted);">None</span>';
+            }
+
+            const mods = modsString.split(',');
+            return `<div class="mods">${mods.map(mod => `<span class="mod">${mod}</span>`).join('')}</div>`;
+        }
+
+        function getRankClass(rank) {
+            if (rank === 1) return 'rank-1';
+            if (rank === 2) return 'rank-2';
+            if (rank === 3) return 'rank-3';
+            return '';
+        }
+
+        function getRankIcon(rank) {
+            switch (rank) {
+                case 1: return '<i class="fas fa-crown" style="color: gold;"></i>';
+                case 2: return '<i class="fas fa-medal" style="color: silver;"></i>';
+                case 3: return '<i class="fas fa-medal" style="color: #cd7f32;"></i>';
+                default: return '';
+            }
+        }
+
+        function updatePagination(pagination) {
+            const paginationEl = document.getElementById('pagination');
+            const totalPages = Math.ceil(state.totalItems / state.itemsPerPage);
+            
+            let paginationHTML = '';
+            
+            // Previous button
+            paginationHTML += `
+                <button ${state.currentPage === 1 ? 'disabled' : ''} onclick="changePage(${state.currentPage - 1})">
+                    <i class="fas fa-chevron-left"></i> Previous
+                </button>
+            `;
+            
+            // Page numbers
+            const startPage = Math.max(1, state.currentPage - 2);
+            const endPage = Math.min(totalPages || 1, state.currentPage + 2);
+            
+            for (let i = startPage; i <= endPage; i++) {
+                paginationHTML += `
+                    <button class="${i === state.currentPage ? 'active' : ''}" onclick="changePage(${i})">
+                        ${i}
+                    </button>
+                `;
+            }
+            
+            // Next button
+            paginationHTML += `
+                <button ${!pagination.hasMore ? 'disabled' : ''} onclick="changePage(${state.currentPage + 1})">
+                    Next <i class="fas fa-chevron-right"></i>
+                </button>
+            `;
+            
+            paginationEl.innerHTML = paginationHTML;
+        }
+
+        function changePage(page) {
+            if (page < 1) return;
+            state.currentPage = page;
+            loadLeaderboard();
+        }
+
+        async function refreshData() {
+            const refreshBtn = document.getElementById('refreshBtn');
+            refreshBtn.classList.add('loading');
+            
+            try {
+                await Promise.all([
+                    loadOverviewStats(),
+                    loadLeaderboard()
+                ]);
+                showToast('Data refreshed successfully!', 'success');
+            } catch (error) {
+                showToast('Failed to refresh data', 'error');
+            } finally {
+                refreshBtn.classList.remove('loading');
+            }
+        }
+
+        async function performSearch() {
+            const query = document.getElementById('searchInput').value.trim();
+            if (!query) return;
+
+            try {
+                const response = await fetch(`${API_BASE}/search?q=${encodeURIComponent(query)}&type=all&limit=20`);
+                const result = await response.json();
+                
+                if (result.success) {
+                    displaySearchResults(result.data, query);
+                } else {
+                    throw new Error(result.error || 'Search failed');
+                }
+            } catch (error) {
+                console.error('Search failed:', error);
+                showToast('Search failed', 'error');
+            }
+        }
+
+        function displaySearchResults(results, query) {
+            // This would typically show a modal or dropdown with search results
+            // For now, we'll filter the current leaderboard
+            if (results.players && results.players.length > 0) {
+                state.filters.player = query;
+                document.getElementById('playerFilter').value = query;
+                state.currentPage = 1;
+                loadLeaderboard();
+            } else {
+                showToast('No results found', 'error');
+            }
+        }
+
+        function updateScanProgress(progress) {
+            // Update refresh button with progress
+            const refreshBtn = document.getElementById('refreshBtn');
+            if (progress.percentage < 100) {
+                refreshBtn.innerHTML = `<i class="fas fa-sync fa-spin"></i> ${progress.percentage}%`;
+                refreshBtn.classList.add('loading');
+            } else {
+                refreshBtn.innerHTML = '<i class="fas fa-sync"></i> Refresh';
+                refreshBtn.classList.remove('loading');
+            }
+        }
+
+        function showToast(message, type = 'info') {
+            const toast = document.getElementById('toast');
+            const content = toast.querySelector('.toast-content') || toast;
+            
+            content.textContent = message;
+            toast.className = `toast ${type}`;
+            toast.classList.add('show');
+            
+            setTimeout(() => {
+                toast.classList.remove('show');
+            }, 5000);
+        }
+
+        // Placeholder functions for other tabs
+        async function loadPlayerRankings() {
+            console.log('Loading player rankings...');
+            // Implement player rankings loading
+        }
+
+        async function loadAnalytics() {
+            console.log('Loading analytics...');
+            // Implement analytics loading
+        }
+
+        async function loadSkillRankings() {
+            console.log('Loading skill rankings...');
+            // Implement skill rankings loading
+        }
+
+        // Utility functions
+        function formatNumber(num) {
+            if (num >= 1000000) {
+                return (num / 1000000).toFixed(1) + 'M';
+            } else if (num >= 1000) {
+                return (num / 1000).toFixed(1) + 'K';
+            }
+            return num.toLocaleString();
+        }
+
+        function formatScore(score) {
+            return parseInt(score).toLocaleString();
+        }
+
+        function formatAccuracy(accuracy) {
+            if (!accuracy) return '-';
+            return (accuracy * 100).toFixed(2) + '%';
+        }
+
+        function formatRelativeTime(timestamp) {
+            const now = Date.now();
+            const diff = now - parseInt(timestamp);
+            const minutes = Math.floor(diff / 60000);
+            const hours = Math.floor(diff / 3600000);
+            const days = Math.floor(diff / 86400000);
+
+            if (days > 0) return `${days}d ago`;
+            if (hours > 0) return `${hours}h ago`;
+            if (minutes > 0) return `${minutes}m ago`;
+            return 'Just now';
+        }
+
+        function formatFullDate(timestamp) {
+            return new Date(parseInt(timestamp)).toLocaleString();
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        function debounce(func, wait) {
+            let timeout;
+            return function executedFunction(...args) {
+                const later = () => {
+                    clearTimeout(timeout);
+                    func(...args);
+                };
+                clearTimeout(timeout);
+                timeout = setTimeout(later, wait);
+            };
+        }
+
+        // Global error handling
+        window.addEventListener('error', (event) => {
+            console.error('Global error:', event.error);
+            showToast('An unexpected error occurred', 'error');
+        });
+
+        window.addEventListener('unhandledrejection', (event) => {
+            console.error('Unhandled promise rejection:', event.reason);
+            showToast('A network error occurred', 'error');
+        });
+    </script>
 </body>
 </html>
