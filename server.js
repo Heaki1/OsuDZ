@@ -2113,29 +2113,23 @@ app.post("/api/admin/refresh-player-stats", authenticateToken, async (req, res) 
   try {
     await pool.query('BEGIN');
 
+    // Existing updates...
+
+    // Update total_scores and best_score from algeria_top50
     await pool.query(`
       UPDATE player_stats
-      SET total_scores = sub.count
+      SET
+        total_scores = sub.count,
+        best_score = sub.best_score
       FROM (
-        SELECT username, COUNT(*) AS count
-        FROM player_scores
+        SELECT username, COUNT(*) AS count, MAX(score) AS best_score
+        FROM algeria_top50
         GROUP BY username
       ) AS sub
       WHERE player_stats.username = sub.username
     `);
 
-    await pool.query(`
-      UPDATE player_stats
-      SET avg_rank = sub.avg_rank
-      FROM (
-        SELECT username, AVG(rank) AS avg_rank
-        FROM player_scores
-        GROUP BY username
-      ) AS sub
-      WHERE player_stats.username = sub.username
-    `);
-
-    // Add more updates here...
+    // Add any other updates you want here
 
     await pool.query('COMMIT');
 
