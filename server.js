@@ -815,9 +815,10 @@ class PlayerDiscoveryService {
     }
   }
 
-  // Discord notification
-  async sendNewPlayerNotification(userData, discoveryMethod) {
-    if (!process.env.DISCORD_WEBHOOK_URL) return;
+// Discord notification (disabled temporarily)
+async sendNewPlayerNotification(userData, discoveryMethod) {
+    return; // skip sending anything
+}
     
     try {
       const embed = {
