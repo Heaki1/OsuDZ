@@ -106,6 +106,21 @@ const pool = new Pool({
   try {
     const res = await pool.query('SELECT current_database(), current_schema()');
     log('INFO', `Connected to DB: ${res.rows[0].current_database}, schema: ${res.rows[0].current_schema}`);
+
+    // === Auto-create missing columns ===
+    await pool.query(`
+      ALTER TABLE IF EXISTS players 
+      ADD COLUMN IF NOT EXISTS last_seen TIMESTAMP DEFAULT now();
+    `);
+
+    await pool.query(`
+      ALTER TABLE IF EXISTS algeria_top50
+      ADD COLUMN IF NOT EXISTS artist TEXT,
+      ADD COLUMN IF NOT EXISTS difficulty_name TEXT,
+      ADD COLUMN IF NOT EXISTS pp REAL;
+    `);
+
+    log('INFO', '✅ Schema check completed (missing columns added if needed)');
   } catch (err) {
     log('ERROR', 'DB check failed:', err.message);
   }
