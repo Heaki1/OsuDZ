@@ -102,6 +102,15 @@ const pool = new Pool({
   connectionTimeoutMillis: 5000, // Increased timeout
 });
 
+(async () => {
+  try {
+    const res = await pool.query('SELECT current_database(), current_schema()');
+    log('INFO', `Connected to DB: ${res.rows[0].current_database}, schema: ${res.rows[0].current_schema}`);
+  } catch (err) {
+    log('ERROR', 'DB check failed:', err.message);
+  }
+})();
+
 // Database helper functions
 async function query(sql, params = []) { 
   const client = await pool.connect();
