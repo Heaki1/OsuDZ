@@ -905,6 +905,18 @@ class PlayerDiscoveryService {
     }
   }
 
+   // Updated runDiscovery
+  async runDiscovery() {
+    const results = {
+      countryRankings: await this.discoverFromCountryRankings(),
+      recentScores: await this.discoverFromRecentScores(),
+      userSearch: await this.discoverFromUserSearch(),
+      multiplayerMatches: await this.discoverFromMultiplayerMatches()
+    };
+    broadcastToClients({ type: 'discovery_complete', results });
+    return results;
+  }
+}
 
 // Initialize player discovery
 const playerDiscovery = new PlayerDiscoveryService();
