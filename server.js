@@ -117,10 +117,21 @@ const pool = new Pool({
 
     // === Auto-create missing columns for algeria_top50 ===
     await pool.query(`
-      ALTER TABLE algeria_top50
-      ADD COLUMN IF NOT EXISTS artist TEXT,
-      ADD COLUMN IF NOT EXISTS difficulty_name TEXT,
-      ADD COLUMN IF NOT EXISTS pp REAL;
+    ALTER TABLE algeria_top50
+    ADD COLUMN IF NOT EXISTS pp REAL;
+    ADD COLUMN IF NOT EXISTS artist TEXT,
+    ADD COLUMN IF NOT EXISTS difficulty_name TEXT,
+    ADD COLUMN IF NOT EXISTS difficulty_rating REAL DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS max_combo INTEGER DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS count_300 INTEGER DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS count_100 INTEGER DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS count_50 INTEGER DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS count_miss INTEGER DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS accuracy REAL,
+    ADD COLUMN IF NOT EXISTS accuracy_text TEXT,
+    ADD COLUMN IF NOT EXISTS mods TEXT,
+    ADD COLUMN IF NOT EXISTS play_date BIGINT,
+    ADD COLUMN IF NOT EXISTS last_updated BIGINT;
     `);
 
     // === Auto-create missing columns for player_stats ===
