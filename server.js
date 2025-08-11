@@ -1361,10 +1361,10 @@ async function calculateDailyStats() {
       `, [yesterday]),
       
       getRow(`
-        SELECT AVG(accuracy) as avg 
-        FROM algeria_top50 
-        WHERE last_updated > $1 AND accuracy > 0
-      `, [yesterday]),
+  SELECT AVG(accuracy) as avg 
+  FROM algeria_top50 
+  WHERE last_updated > $1 AND accuracy::numeric > 0
+`, [yesterday])
       
       getRow(`
         SELECT MAX(score) as max 
