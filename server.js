@@ -2384,10 +2384,3 @@ async function shutdown(code = 0) {
 }
 
 process.on('SIGTERM', () => shutdown(0));
-
-// Server Start
-// =======================
-const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => {
-  log('INFO', `HTTP + WS server listening on port ${PORT}`);
-});
