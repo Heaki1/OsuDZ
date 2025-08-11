@@ -189,7 +189,8 @@ async function getCached(key, fetchFunction, ttl = 300) {
     if (cached) return JSON.parse(cached);
     
     const data = await fetchFunction();
-    await redisClient.setex(key, ttl, JSON.stringify(data));
+    // Replace setex with set + EX option
+    await redisClient.set(key, JSON.stringify(data), { EX: ttl });
     return data;
   } catch (err) {
     log('WARN', 'Cache error, falling back to direct fetch:', err.message);
