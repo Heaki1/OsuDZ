@@ -1769,8 +1769,8 @@ app.get('/api/rankings', asyncHandler(async (req, res) => {
       };
       
       const cutoff = Date.now() - (timeRanges[timeframe] || 0);
-      whereClause += ` AND last_calculated >= ${++paramCount}`;
-      params.push(cutoff);
+        whereClauses.push(`last_calculated >= $${++paramCount}`);
+        params.push(cutoff);
     }
     
     params.push(parseInt(limit), parseInt(offset));
