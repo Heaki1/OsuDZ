@@ -1319,7 +1319,7 @@ async function updatePlayerSkills(username, playerScores) {
   } catch (err) {
     log('ERROR', 'Skill tracking update failed:', err.message);
   }
-
+} 
 // ==================== DAILY STATISTICS ====================
 async function calculateDailyStats() {
   try {
