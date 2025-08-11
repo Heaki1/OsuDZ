@@ -1319,36 +1319,6 @@ async function updatePlayerSkills(username, playerScores) {
   } catch (err) {
     log('ERROR', 'Skill tracking update failed:', err.message);
   }
-}
-
-async function sendDiscordNotification(score, beatmapTitle, beatmapId, type = 'new_first') {
-  if (!process.env.DISCORD_WEBHOOK_URL) return;
-  
-  try {
-    const embed = {
-      title: "New Algerian #1 Score! 🇩🇿👑",
-      description: `**${score.username}** achieved rank #1!`,
-      fields: [
-        { name: "Beatmap", value: `[${beatmapTitle}](https://osu.ppy.sh/beatmaps/${beatmapId})`, inline: false },
-        { name: "Score", value: Number(score.score).toLocaleString(), inline: true },
-        { name: "Accuracy", value: (score.accuracy * 100).toFixed(2) + '%', inline: true },
-        { name: "Mods", value: score.mods?.join(',') || 'None', inline: true },
-        { name: "PP", value: score.pp ? score.pp.toFixed(0) + 'pp' : 'N/A', inline: true },
-        { name: "Combo", value: score.max_combo ? score.max_combo + 'x' : 'N/A', inline: true },
-        { name: "Misses", value: score.statistics?.count_miss || 0, inline: true }
-      ],
-      color: 0xff66aa,
-      timestamp: new Date().toISOString(),
-      thumbnail: { url: `https://a.ppy.sh/${score.user.id}` },
-      footer: { text: "Algeria osu! Leaderboards" }
-    };
-    
-    await axios.post(process.env.DISCORD_WEBHOOK_URL, { embeds: [embed] });
-    log('INFO', `📢 Discord notification sent for ${score.username}'s score`);
-  } catch (err) {
-    log('ERROR', 'Discord notification failed:', err.message);
-  }
-}
 
 // ==================== DAILY STATISTICS ====================
 async function calculateDailyStats() {
