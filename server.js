@@ -624,97 +624,97 @@ class PlayerDiscoveryService {
   }
 
   // Core player registration
-  async registerPlayer(userData, discoveryMethod = 'unknown') {
-    try {
-      if (!userData || !userData.id || userData.country?.code !== 'DZ') {
-        return false;
-      }
-
-      // Check if player already exists
-      const existingPlayer = await getRow(`
-        SELECT username, last_seen FROM player_stats 
-        WHERE user_id = $1 OR username ILIKE $2
-      `, [userData.id, userData.username]);
-
-      const now = Date.now();
-      const isNewPlayer = !existingPlayer;
-
-      if (isNewPlayer) {
-        log('INFO', `🆕 New Algerian player: ${userData.username} (${discoveryMethod})`);
-        
-        // Send Discord notification
-        if (process.env.DISCORD_WEBHOOK_URL) {
-          await this.sendNewPlayerNotification(userData, discoveryMethod);
-        }
-
-        // Broadcast to clients
-        broadcastToClients({
-          type: 'new_player_discovered',
-          player: {
-            username: userData.username,
-            userId: userData.id,
-            discoveryMethod,
-            timestamp: now
-          }
-        });
-      }
-
-      // Insert/update player
-      await query(`
-        INSERT INTO player_stats (
-          username, user_id, join_date, last_seen, avatar_url, cover_url,
-          global_rank, country_rank, level, playcount, total_playtime, is_active
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, true)
-        ON CONFLICT (username) DO UPDATE SET
-          user_id = COALESCE(EXCLUDED.user_id, player_stats.user_id),
-          last_seen = EXCLUDED.last_seen,
-          avatar_url = COALESCE(EXCLUDED.avatar_url, player_stats.avatar_url),
-          cover_url = COALESCE(EXCLUDED.cover_url, player_stats.cover_url),
-          global_rank = COALESCE(EXCLUDED.global_rank, player_stats.global_rank),
-          country_rank = COALESCE(EXCLUDED.country_rank, player_stats.country_rank),
-          level = COALESCE(EXCLUDED.level, player_stats.level),
-          playcount = COALESCE(EXCLUDED.playcount, player_stats.playcount),
-          total_playtime = COALESCE(EXCLUDED.total_playtime, player_stats.total_playtime),
-          is_active = true
-      `, [
-        userData.username,
-        userData.id,
-        userData.join_date ? new Date(userData.join_date).getTime() : now,
-        now,
-        userData.avatar_url,
-        userData.cover_url || userData.cover?.url,
-        userData.statistics?.global_rank,
-        userData.statistics?.country_rank,
-        userData.statistics?.level?.current,
-        userData.statistics?.play_count,
-        userData.statistics?.play_time
-      ]);
-
-      // Log discovery
-      await query(`
-        INSERT INTO player_discovery_log (username, user_id, discovery_method, is_new_player, player_data)
-        VALUES ($1, $2, $3, $4, $5)
-      `, [
-        userData.username,
-        userData.id,
-        discoveryMethod,
-        isNewPlayer,
-        JSON.stringify(userData)
-      ]);
-
-      // If new player, fetch their history
-      if (isNewPlayer) {
-        setTimeout(() => {
-          this.fetchPlayerHistory(userData.username, userData.id);
-        }, 5000);
-      }
-
-      return isNewPlayer;
-    } catch (err) {
-      log('ERROR', `❌ Failed to register ${userData?.username}:`, err.message);
+async registerPlayer(userData, discoveryMethod = 'unknown') {
+  try {
+    if (!userData || !userData.id || userData.country?.code !== 'DZ') {
       return false;
     }
+
+    // Check if player already exists
+    const existingPlayer = await getRow(`
+      SELECT username, last_seen FROM player_stats 
+      WHERE user_id = $1 OR username ILIKE $2
+    `, [userData.id, userData.username]);
+
+    const now = new Date().toISOString();
+    const isNewPlayer = !existingPlayer;
+
+    if (isNewPlayer) {
+      log('INFO', `🆕 New Algerian player: ${userData.username} (${discoveryMethod})`);
+      
+      // Send Discord notification
+      if (process.env.DISCORD_WEBHOOK_URL) {
+        await this.sendNewPlayerNotification(userData, discoveryMethod);
+      }
+
+      // Broadcast to clients
+      broadcastToClients({
+        type: 'new_player_discovered',
+        player: {
+          username: userData.username,
+          userId: userData.id,
+          discoveryMethod,
+          timestamp: now
+        }
+      });
+    }
+
+    // Insert/update player
+    await query(`
+      INSERT INTO player_stats (
+        username, user_id, join_date, last_seen, avatar_url, cover_url,
+        global_rank, country_rank, level, playcount, total_playtime, is_active
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, true)
+      ON CONFLICT (username) DO UPDATE SET
+        user_id = COALESCE(EXCLUDED.user_id, player_stats.user_id),
+        last_seen = EXCLUDED.last_seen,
+        avatar_url = COALESCE(EXCLUDED.avatar_url, player_stats.avatar_url),
+        cover_url = COALESCE(EXCLUDED.cover_url, player_stats.cover_url),
+        global_rank = COALESCE(EXCLUDED.global_rank, player_stats.global_rank),
+        country_rank = COALESCE(EXCLUDED.country_rank, player_stats.country_rank),
+        level = COALESCE(EXCLUDED.level, player_stats.level),
+        playcount = COALESCE(EXCLUDED.playcount, player_stats.playcount),
+        total_playtime = COALESCE(EXCLUDED.total_playtime, player_stats.total_playtime),
+        is_active = true
+    `, [
+      userData.username,
+      userData.id,
+      userData.join_date ? new Date(userData.join_date).toISOString() : now,
+      now,
+      userData.avatar_url,
+      userData.cover_url || userData.cover?.url,
+      userData.statistics?.global_rank,
+      userData.statistics?.country_rank,
+      userData.statistics?.level?.current,
+      userData.statistics?.play_count,
+      userData.statistics?.play_time
+    ]);
+
+    // Log discovery
+    await query(`
+      INSERT INTO player_discovery_log (username, user_id, discovery_method, is_new_player, player_data)
+      VALUES ($1, $2, $3, $4, $5)
+    `, [
+      userData.username,
+      userData.id,
+      discoveryMethod,
+      isNewPlayer,
+      JSON.stringify(userData)
+    ]);
+
+    // If new player, fetch their history
+    if (isNewPlayer) {
+      setTimeout(() => {
+        this.fetchPlayerHistory(userData.username, userData.id);
+      }, 5000);
+    }
+
+    return isNewPlayer;
+  } catch (err) {
+    log('ERROR', `❌ Failed to register ${userData?.username}:`, err.message);
+    return false;
   }
+}
 
   // Fetch comprehensive player history
   async fetchPlayerHistory(username, userId) {
@@ -786,34 +786,41 @@ class PlayerDiscoveryService {
   }
 
   // Update player statistics
-  async updatePlayerStats(username, scores) {
-    try {
-      if (scores.length === 0) return;
+async updatePlayerStats(username, scores) {
+  try {
+    if (scores.length === 0) return;
 
-      const totalPP = scores.reduce((sum, s) => sum + (s.pp || 0), 0);
-      const avgAccuracy = scores.reduce((sum, s) => sum + (s.accuracy || 0), 0) / scores.length;
-      const bestScore = Math.max(...scores.map(s => s.score || 0));
-      
-      // Calculate weighted PP
-      const weightedPP = scores.reduce((sum, score, index) => {
-        return sum + (score.pp || 0) * Math.pow(0.95, index);
-      }, 0);
+    const totalPP = scores.reduce((sum, s) => sum + (s.pp || 0), 0);
+    const avgAccuracy = scores.reduce((sum, s) => sum + (s.accuracy || 0), 0) / scores.length;
+    const bestScore = Math.max(...scores.map(s => s.score || 0));
 
-      await query(`
-        UPDATE player_stats SET
-          total_pp = $2,
-          weighted_pp = $3,
-          accuracy_avg = $4,
-          best_score = $5,
-          playcount = $6,
-          last_calculated = $7
-        WHERE username = $1
-      `, [username, totalPP, weightedPP, avgAccuracy, bestScore, scores.length, Date.now()]);
+    const weightedPP = scores.reduce((sum, score, index) => {
+      return sum + (score.pp || 0) * Math.pow(0.95, index);
+    }, 0);
 
-    } catch (err) {
-      log('ERROR', `Failed to update stats for ${username}:`, err.message);
-    }
+    await query(`
+      UPDATE player_stats SET
+        total_pp = $2,
+        weighted_pp = $3,
+        accuracy_avg = $4,
+        best_score = $5,
+        playcount = $6,
+        last_calculated = $7
+      WHERE username = $1
+    `, [
+      username,
+      totalPP,
+      weightedPP,
+      avgAccuracy,
+      bestScore,
+      scores.length,
+      new Date().toISOString()  // <-- changed from Date.now()
+    ]);
+
+  } catch (err) {
+    log('ERROR', `Failed to update stats for ${username}:`, err.message);
   }
+}
 
 // Discord notification (disabled temporarily)
 async sendNewPlayerNotification(userData, discoveryMethod) {
