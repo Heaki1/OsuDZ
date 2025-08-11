@@ -99,9 +99,9 @@ redisClient.connect().catch((err) => {
 // ==================== DATABASE SETUP ====================
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  max: 10, // Reduced from 30 for better resource management
+  max: 10,
   idleTimeoutMillis: 30000,
-  connectionTimeoutMillis: 5000, // Increased timeout
+  connectionTimeoutMillis: 5000,
 });
 
 (async () => {
@@ -111,13 +111,13 @@ const pool = new Pool({
 
     // === Auto-create missing columns for players ===
     await pool.query(`
-      ALTER TABLE IF EXISTS players 
+      ALTER TABLE players 
       ADD COLUMN IF NOT EXISTS last_seen TIMESTAMP DEFAULT now();
     `);
 
     // === Auto-create missing columns for algeria_top50 ===
     await pool.query(`
-      ALTER TABLE IF NOT EXISTS algeria_top50
+      ALTER TABLE algeria_top50
       ADD COLUMN IF NOT EXISTS artist TEXT,
       ADD COLUMN IF NOT EXISTS difficulty_name TEXT,
       ADD COLUMN IF NOT EXISTS pp REAL;
@@ -125,9 +125,10 @@ const pool = new Pool({
 
     // === Auto-create missing columns for player_stats ===
     await pool.query(`
-      ALTER TABLE IF NOT EXISTS player_stats
+      ALTER TABLE player_stats
       ADD COLUMN IF NOT EXISTS user_id BIGINT,
-      ADD COLUMN IF NOT EXISTS last_seen TIMESTAMP DEFAULT now();
+      ADD COLUMN IF NOT EXISTS last_seen TIMESTAMP DEFAULT now(),
+      ADD COLUMN IF NOT EXISTS join_date TIMESTAMP;
     `);
 
     log('INFO', '✅ Schema check completed (missing columns added if needed)');
@@ -1599,70 +1600,68 @@ app.get('/health', asyncHandler(async (req, res) => {
 // Enhanced leaderboards endpoint
 app.get('/api/leaderboards', asyncHandler(async (req, res) => {
   const {
-    limit = 100, offset = 0, sort = 'score', order = 'DESC',
-    minDifficulty = 0, maxDifficulty = 15, mods, player, timeRange
+    limit = 100,
+    offset = 0,
+    sort = 'score',
+    order = 'DESC',
+    minDifficulty = 0,
+    maxDifficulty = 15,
+    mods,
+    player,
+    timeRange
   } = req.query;
-  
-  const cacheKey = getCacheKey('leaderboard', JSON.stringify(req.query));
-  
-  const data = await getCached(cacheKey, async () => {
-    let whereClause = 'WHERE 1=1';
-    let params = [];
-    let paramCount = 0;
-    
-    if (minDifficulty > 0) {
-      whereClause += ` AND difficulty_rating >= ${++paramCount}`;
-      params.push(parseFloat(minDifficulty));
-    }
-    
-    if (maxDifficulty < 15) {
-      whereClause += ` AND difficulty_rating <= ${++paramCount}`;
-      params.push(parseFloat(maxDifficulty));
-    }
-    
-    if (mods && mods !== 'all') {
-      whereClause += ` AND mods ILIKE ${++paramCount}`;
-      params.push(`%${mods}%`);
-    }
-    
-    if (player) {
-      whereClause += ` AND username ILIKE ${++paramCount}`;
-      params.push(`%${player}%`);
-    }
-    
-    if (timeRange) {
-      const timeRanges = {
-        '24h': 24 * 60 * 60 * 1000,
-        '7d': 7 * 24 * 60 * 60 * 1000,
-        '30d': 30 * 24 * 60 * 60 * 1000
-      };
-      
-      const cutoff = Date.now() - (timeRanges[timeRange] || timeRanges['30d']);
-      whereClause += ` AND last_updated >= ${++paramCount}`;
-      params.push(cutoff);
-    }
-    
-    params.push(parseInt(limit), parseInt(offset));
-    
-    const allowedSort = ['score', 'rank', 'last_updated', 'pp', 'difficulty_rating', 'accuracy'];
-    const sortColumn = allowedSort.includes(sort) ? sort : 'score';
-    const sortOrder = ['ASC', 'DESC'].includes(order.toUpperCase()) ? order.toUpperCase() : 'DESC';
-    
-return await getRows(
-  `SELECT *, 
-          RANK() OVER (ORDER BY ${sortColumn} ${sortOrder}) as global_rank
-   FROM algeria_top50 
-   ${whereClause}
-   ORDER BY ${sortColumn} ${sortOrder} 
-   LIMIT $${++paramCount} OFFSET $${++paramCount}`,
-  [...params, parseInt(limit), parseInt(offset)]
-);
-  }, 180);
-  
+
+  const allowedSort = [
+    'score', 'rank', 'last_updated', 'pp',
+    'difficulty_rating', 'accuracy'
+  ];
+  const sortColumn = allowedSort.includes(sort) ? sort : 'score';
+  const sortOrder = order.toUpperCase() === 'ASC' ? 'ASC' : 'DESC';
+
+  let params = [];
+  let whereClauses = [];
+
+  // Filters
+  if (minDifficulty) {
+    params.push(parseFloat(minDifficulty));
+    whereClauses.push(`difficulty_rating >= $${params.length}`);
+  }
+  if (maxDifficulty) {
+    params.push(parseFloat(maxDifficulty));
+    whereClauses.push(`difficulty_rating <= $${params.length}`);
+  }
+  if (mods) {
+    params.push(mods);
+    whereClauses.push(`mods = $${params.length}`);
+  }
+  if (player) {
+    params.push(player);
+    whereClauses.push(`username ILIKE $${params.length}`);
+  }
+
+  const whereClause = whereClauses.length ? `WHERE ${whereClauses.join(' AND ')}` : '';
+
+  // Pagination parameters (sync paramCount with current length)
+  let paramCount = params.length;
+  params.push(parseInt(limit), parseInt(offset));
+
+  const sql = `
+    SELECT *,
+           ROW_NUMBER() OVER (ORDER BY ${sortColumn} ${sortOrder}) as rank
+    FROM player_stats
+    ${whereClause}
+    ORDER BY ${sortColumn} ${sortOrder}
+    LIMIT $${++paramCount} OFFSET $${++paramCount}
+  `;
+
+  const data = await getRows(sql, params);
+
   res.json({
     success: true,
     data,
-    pagination: {
+    meta: {
+      sort: sortColumn,
+      order: sortOrder,
       limit: parseInt(limit),
       offset: parseInt(offset),
       hasMore: data.length === parseInt(limit)
