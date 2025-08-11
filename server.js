@@ -10,29 +10,51 @@ const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 const rateLimit = require('express-rate-limit');
 const helmet = require('helmet');
+const { createServer } = require('http');
+const WebSocket = require('ws');
 
+// ==================== ENVIRONMENT VALIDATION ====================
+const requiredEnvVars = [
+  'OSU_CLIENT_ID', 'OSU_CLIENT_SECRET', 
+  'DATABASE_URL', 'REDIS_URL', 'JWT_SECRET'
+];
+
+requiredEnvVars.forEach(envVar => {
+  if (!process.env[envVar]) {
+    console.error(`❌ Missing required environment variable: ${envVar}`);
+    process.exit(1);
+  }
+});
+
+// ==================== APP INITIALIZATION ====================
 const app = express();
 const port = process.env.PORT || 3000;
 
+// Enhanced security middleware
 app.use(helmet({
   contentSecurityPolicy: {
     directives: {
       defaultSrc: ["'self'"],
       scriptSrc: ["'self'", "'unsafe-inline'"],
-      styleSrc: ["'self'", "'unsafe-inline'"]
+      styleSrc: ["'self'", "'unsafe-inline'", "https://cdnjs.cloudflare.com"],
+      fontSrc: ["'self'", "https://cdnjs.cloudflare.com"]
     }
   }
 }));
 
-// Rate limiting
-const httpLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 100,
-  message: 'Too many requests from this IP'
+// Enhanced rate limiting
+const createRateLimit = (windowMs, max, message) => rateLimit({
+  windowMs,
+  max: (req) => req.user ? max * 2 : max, // Higher limits for authenticated users
+  message: { success: false, error: message },
+  standardHeaders: true,
+  legacyHeaders: false,
 });
-app.use(httpLimiter);
 
-// Enhanced logging with colors and levels
+app.use('/api/', createRateLimit(15 * 60 * 1000, 100, 'Too many API requests'));
+app.use('/api/admin/', createRateLimit(15 * 60 * 1000, 20, 'Too many admin requests'));
+
+// ==================== LOGGING SYSTEM ====================
 const colors = {
   reset: '\x1b[0m', bright: '\x1b[1m', red: '\x1b[31m', green: '\x1b[32m',
   yellow: '\x1b[33m', blue: '\x1b[34m', magenta: '\x1b[35m', cyan: '\x1b[36m'
@@ -45,315 +67,82 @@ function log(level, ...args) {
   console.log(`${color}[${ts}] ${level}:${colors.reset}`, ...args);
 }
 
-// Redis setup for caching (with TLS for Redis Cloud)
+// ==================== REDIS SETUP ====================
 const url = process.env.REDIS_URL;
-
 let redisOptions = { url };
 
 if (url && url.startsWith('rediss://')) {
-  // Enable TLS for Redis Cloud
   const { hostname } = new URL(url);
   redisOptions.socket = {
     tls: true,
-    servername: hostname, // ensures SSL cert matches host
-    rejectUnauthorized: false // skip strict cert check if needed
+    servername: hostname,
+    rejectUnauthorized: false
   };
 }
 
 const redisClient = redis.createClient(redisOptions);
 
 redisClient.on('error', (err) => {
-  console.error('[Redis Error]', err);
+  log('ERROR', '[Redis Error]', err.message);
 });
 
-redisClient.connect()
-  .then(() => console.log('✅ Connected to Redis'))
-  .catch((err) => console.error('❌ Redis connection failed:', err));
+redisClient.on('connect', () => {
+  log('INFO', '✅ Connected to Redis');
+});
 
+redisClient.connect().catch((err) => {
+  log('ERROR', '❌ Redis connection failed:', err.message);
+});
 
-// Enhanced database setup with connection pooling
+// ==================== DATABASE SETUP ====================
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  max: 30, idleTimeoutMillis: 30000, connectionTimeoutMillis: 2000,
+  max: 10, // Reduced from 30 for better resource management
+  idleTimeoutMillis: 30000,
+  connectionTimeoutMillis: 5000, // Increased timeout
 });
 
-async function query(sql, params = []) { return pool.query(sql, params); }
-async function getRows(sql, params = []) { return (await pool.query(sql, params)).rows; }
-async function getRow(sql, params = []) { return (await pool.query(sql, params)).rows[0]; }
-
-// Comprehensive database schema
-async function ensureTables() {
-  // Core leaderboard table with enhanced fields
-  await query(`
-    CREATE TABLE IF NOT EXISTS algeria_top50 (
-      beatmap_id BIGINT,
-      beatmap_title TEXT,
-      artist TEXT,
-      difficulty_name TEXT,
-      player_id BIGINT,
-      username TEXT,
-      rank INTEGER,
-      score BIGINT,
-      accuracy REAL,
-      accuracy_text TEXT,
-      mods TEXT,
-      pp REAL DEFAULT 0,
-      difficulty_rating REAL DEFAULT 0,
-      max_combo INTEGER DEFAULT 0,
-      count_300 INTEGER DEFAULT 0,
-      count_100 INTEGER DEFAULT 0,
-      count_50 INTEGER DEFAULT 0,
-      count_miss INTEGER DEFAULT 0,
-      play_date BIGINT,
-      last_updated BIGINT,
-      PRIMARY KEY (beatmap_id, player_id)
-    );
-  `);
-
-  // Enhanced player statistics
-  await query(`
-    CREATE TABLE IF NOT EXISTS player_stats (
-      username TEXT PRIMARY KEY,
-      user_id BIGINT UNIQUE,
-      total_scores INTEGER DEFAULT 0,
-      avg_rank REAL DEFAULT 0,
-      best_score BIGINT DEFAULT 0,
-      total_pp REAL DEFAULT 0,
-      weighted_pp REAL DEFAULT 0,
-      first_places INTEGER DEFAULT 0,
-      top_10_places INTEGER DEFAULT 0,
-      accuracy_avg REAL DEFAULT 0,
-      playcount INTEGER DEFAULT 0,
-      total_playtime INTEGER DEFAULT 0,
-      level REAL DEFAULT 1,
-      global_rank INTEGER DEFAULT 0,
-      country_rank INTEGER DEFAULT 0,
-      join_date BIGINT,
-      last_seen BIGINT,
-      last_calculated BIGINT DEFAULT 0,
-      is_active BOOLEAN DEFAULT true,
-      avatar_url TEXT,
-      cover_url TEXT
-    );
-  `);
-
-  // Skill tracking system
-  await query(`
-    CREATE TABLE IF NOT EXISTS skill_tracking (
-      id SERIAL PRIMARY KEY,
-      username TEXT,
-      skill_type TEXT, -- 'aim', 'speed', 'accuracy', 'reading', 'consistency'
-      skill_value REAL,
-      confidence REAL DEFAULT 0.5,
-      calculated_at BIGINT,
-      FOREIGN KEY (username) REFERENCES player_stats(username)
-    );
-  `);
-
-  // Player achievements system
-  await query(`
-    CREATE TABLE IF NOT EXISTS achievements (
-      id SERIAL PRIMARY KEY,
-      name TEXT UNIQUE,
-      description TEXT,
-      category TEXT,
-      icon TEXT,
-      points INTEGER DEFAULT 0,
-      created_at BIGINT DEFAULT EXTRACT(EPOCH FROM NOW()) * 1000
-    );
-  `);
-
-  await query(`
-    CREATE TABLE IF NOT EXISTS player_achievements (
-      id SERIAL PRIMARY KEY,
-      username TEXT,
-      achievement_id INTEGER,
-      unlocked_at BIGINT DEFAULT EXTRACT(EPOCH FROM NOW()) * 1000,
-      progress REAL DEFAULT 1.0,
-      FOREIGN KEY (username) REFERENCES player_stats(username),
-      FOREIGN KEY (achievement_id) REFERENCES achievements(id),
-      UNIQUE(username, achievement_id)
-    );
-  `);
-
-  // Seasonal tracking
-  await query(`
-    CREATE TABLE IF NOT EXISTS seasons (
-      id SERIAL PRIMARY KEY,
-      name TEXT,
-      start_date BIGINT,
-      end_date BIGINT,
-      is_active BOOLEAN DEFAULT false
-    );
-  `);
-
-  await query(`
-    CREATE TABLE IF NOT EXISTS seasonal_stats (
-      id SERIAL PRIMARY KEY,
-      season_id INTEGER,
-      username TEXT,
-      total_pp REAL DEFAULT 0,
-      rank_position INTEGER,
-      scores_count INTEGER DEFAULT 0,
-      improvement_rate REAL DEFAULT 0,
-      FOREIGN KEY (season_id) REFERENCES seasons(id),
-      FOREIGN KEY (username) REFERENCES player_stats(username)
-    );
-  `);
-
-  // Enhanced analytics tables
-  await query(`
-    CREATE TABLE IF NOT EXISTS player_activity (
-      id SERIAL PRIMARY KEY,
-      username TEXT,
-      activity_type TEXT, -- 'score_set', 'rank_improved', 'achievement_unlocked'
-      activity_data JSONB,
-      timestamp BIGINT DEFAULT EXTRACT(EPOCH FROM NOW()) * 1000,
-      FOREIGN KEY (username) REFERENCES player_stats(username)
-    );
-  `);
-
-  await query(`
-    CREATE TABLE IF NOT EXISTS daily_stats (
-      date DATE PRIMARY KEY,
-      active_players INTEGER DEFAULT 0,
-      new_scores INTEGER DEFAULT 0,
-      new_players INTEGER DEFAULT 0,
-      total_pp_gained REAL DEFAULT 0,
-      average_accuracy REAL DEFAULT 0,
-      top_score BIGINT DEFAULT 0
-    );
-  `);
-
-  // Beatmap metadata and recommendations
-  await query(`
-    CREATE TABLE IF NOT EXISTS beatmap_metadata (
-      beatmap_id BIGINT PRIMARY KEY,
-      beatmapset_id BIGINT,
-      artist TEXT,
-      title TEXT,
-      version TEXT,
-      creator TEXT,
-      difficulty_rating REAL,
-      cs REAL,
-      ar REAL,
-      od REAL,
-      hp REAL,
-      length INTEGER,
-      bpm REAL,
-      max_combo INTEGER,
-      tags TEXT[],
-      genre_id INTEGER,
-      language_id INTEGER,
-      play_count INTEGER DEFAULT 0,
-      favorite_count INTEGER DEFAULT 0,
-      ranked_date BIGINT,
-      last_updated BIGINT
-    );
-  `);
-
-  // Player preferences and social features
-  await query(`
-    CREATE TABLE IF NOT EXISTS player_preferences (
-      username TEXT PRIMARY KEY,
-      preferred_mods TEXT[],
-      preferred_difficulty_range NUMRANGE,
-      preferred_length_range NUMRANGE,
-      notification_settings JSONB,
-      privacy_settings JSONB,
-      theme_preference TEXT DEFAULT 'dark',
-      language_preference TEXT DEFAULT 'en',
-      FOREIGN KEY (username) REFERENCES player_stats(username)
-    );
-  `);
-
-  await query(`
-    CREATE TABLE IF NOT EXISTS player_relationships (
-      id SERIAL PRIMARY KEY,
-      follower_username TEXT,
-      following_username TEXT,
-      relationship_type TEXT DEFAULT 'follow', -- 'follow', 'friend', 'block'
-      created_at BIGINT DEFAULT EXTRACT(EPOCH FROM NOW()) * 1000,
-      FOREIGN KEY (follower_username) REFERENCES player_stats(username),
-      FOREIGN KEY (following_username) REFERENCES player_stats(username),
-      UNIQUE(follower_username, following_username)
-    );
-  `);
-
-  // Comments and social interaction
-  await query(`
-    CREATE TABLE IF NOT EXISTS player_comments (
-      id SERIAL PRIMARY KEY,
-      target_username TEXT,
-      commenter_username TEXT,
-      comment_text TEXT,
-      created_at BIGINT DEFAULT EXTRACT(EPOCH FROM NOW()) * 1000,
-      is_deleted BOOLEAN DEFAULT false,
-      FOREIGN KEY (target_username) REFERENCES player_stats(username),
-      FOREIGN KEY (commenter_username) REFERENCES player_stats(username)
-    );
-  `);
-
-  // Enhanced indexes for performance
-  const indexes = [
-    'CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_algeria_score ON algeria_top50(score DESC)',
-    'CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_algeria_rank ON algeria_top50(rank ASC)',
-    'CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_algeria_pp ON algeria_top50(pp DESC)',
-    'CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_algeria_updated ON algeria_top50(last_updated DESC)',
-    'CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_algeria_username ON algeria_top50(username)',
-    'CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_algeria_beatmap ON algeria_top50(beatmap_id)',
-    'CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_algeria_mods ON algeria_top50(mods)',
-    'CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_player_stats_pp ON player_stats(total_pp DESC)',
-    'CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_player_stats_rank ON player_stats(country_rank ASC)',
-    'CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_player_activity_time ON player_activity(timestamp DESC)',
-    'CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_skill_tracking_username ON skill_tracking(username)',
-    'CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_achievements_category ON achievements(category)',
-    'CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_beatmap_metadata_difficulty ON beatmap_metadata(difficulty_rating)'
-  ];
-
-  for (const indexSql of indexes) {
-    try {
-      await query(indexSql);
-    } catch (err) {
-      if (!err.message.includes('already exists')) {
-        log('WARN', 'Index creation failed:', err.message);
-      }
-    }
-  }
-
-  // Insert default achievements
-  await insertDefaultAchievements();
-  
-  log('INFO', '✅ Comprehensive database schema ensured');
-}
-
-// Default achievements system
-async function insertDefaultAchievements() {
-  const achievements = [
-    { name: 'First Steps', description: 'Set your first score', category: 'milestone', icon: '🎯', points: 10 },
-    { name: 'Century Club', description: 'Achieve 100 total scores', category: 'milestone', icon: '💯', points: 50 },
-    { name: 'Perfectionist', description: 'Get your first SS rank', category: 'accuracy', icon: '✨', points: 100 },
-    { name: 'Speed Demon', description: 'Get a score with DT mod', category: 'mods', icon: '⚡', points: 25 },
-    { name: 'Precision Master', description: 'Get a score with HR mod', category: 'mods', icon: '🎯', points: 25 },
-    { name: 'In the Dark', description: 'Get a score with HD mod', category: 'mods', icon: '🌑', points: 25 },
-    { name: 'Top Player', description: 'Reach #1 on any beatmap', category: 'ranking', icon: '👑', points: 200 },
-    { name: 'Consistency King', description: 'Set scores on 5 consecutive days', category: 'activity', icon: '📅', points: 75 },
-    { name: 'PP Collector', description: 'Reach 1000 total PP', category: 'performance', icon: '💎', points: 150 },
-    { name: 'Dedication', description: 'Play for 100 hours total', category: 'activity', icon: '⏰', points: 100 },
-    { name: 'Improvement', description: 'Improve rank by 10 positions', category: 'progress', icon: '📈', points: 50 },
-    { name: 'Community Member', description: 'Leave your first comment', category: 'social', icon: '💬', points: 20 }
-  ];
-
-  for (const achievement of achievements) {
-    await query(`
-      INSERT INTO achievements (name, description, category, icon, points)
-      VALUES ($1, $2, $3, $4, $5)
-      ON CONFLICT (name) DO NOTHING
-    `, [achievement.name, achievement.description, achievement.category, achievement.icon, achievement.points]);
+// Database helper functions
+async function query(sql, params = []) { 
+  const client = await pool.connect();
+  try {
+    return await client.query(sql, params);
+  } finally {
+    client.release();
   }
 }
 
-// Caching utilities
+async function getRows(sql, params = []) { 
+  return (await query(sql, params)).rows; 
+}
+
+async function getRow(sql, params = []) { 
+  return (await query(sql, params)).rows[0]; 
+}
+
+// Progress tracking helpers
+async function saveProgress(key, value) {
+  try {
+    await redisClient.set(`progress:${key}`, value);
+  } catch (err) {
+    log('WARN', 'Failed to save progress:', err.message);
+  }
+}
+
+async function getProgress(key) {
+  try {
+    return await redisClient.get(`progress:${key}`);
+  } catch (err) {
+    log('WARN', 'Failed to get progress:', err.message);
+    return null;
+  }
+}
+
+// ==================== CACHING UTILITIES ====================
+const getCacheKey = (prefix, ...parts) => {
+  return `${prefix}:${parts.map(p => String(p).toLowerCase()).join(':')}`;
+};
+
 async function getCached(key, fetchFunction, ttl = 300) {
   try {
     const cached = await redisClient.get(key);
@@ -373,13 +162,14 @@ async function invalidateCache(pattern) {
     const keys = await redisClient.keys(pattern);
     if (keys.length > 0) {
       await redisClient.del(...keys);
+      log('DEBUG', `Invalidated ${keys.length} cache keys`);
     }
   } catch (err) {
     log('WARN', 'Cache invalidation failed:', err.message);
   }
 }
 
-// Enhanced API client
+// ==================== OSU! API CLIENT ====================
 const client_id = process.env.OSU_CLIENT_ID;
 const client_secret = process.env.OSU_CLIENT_SECRET;
 let access_token = null;
@@ -403,10 +193,725 @@ async function getAccessToken() {
   }
 }
 
-// Skill calculation algorithms
+// Rate limiter for API calls
+const limiter = new Bottleneck({ maxConcurrent: 3, minTime: 600 });
+
+// ==================== DATABASE SCHEMA ====================
+async function ensureTables() {
+  try {
+    // Core leaderboard table
+    await query(`
+      CREATE TABLE IF NOT EXISTS algeria_top50 (
+        beatmap_id BIGINT,
+        beatmap_title TEXT,
+        artist TEXT,
+        difficulty_name TEXT,
+        player_id BIGINT,
+        username TEXT,
+        rank INTEGER,
+        score BIGINT,
+        accuracy REAL,
+        accuracy_text TEXT,
+        mods TEXT,
+        pp REAL DEFAULT 0,
+        difficulty_rating REAL DEFAULT 0,
+        max_combo INTEGER DEFAULT 0,
+        count_300 INTEGER DEFAULT 0,
+        count_100 INTEGER DEFAULT 0,
+        count_50 INTEGER DEFAULT 0,
+        count_miss INTEGER DEFAULT 0,
+        play_date BIGINT,
+        last_updated BIGINT,
+        PRIMARY KEY (beatmap_id, player_id)
+      );
+    `);
+
+    // Enhanced player statistics
+    await query(`
+      CREATE TABLE IF NOT EXISTS player_stats (
+        username TEXT PRIMARY KEY,
+        user_id BIGINT UNIQUE,
+        total_scores INTEGER DEFAULT 0,
+        avg_rank REAL DEFAULT 0,
+        best_score BIGINT DEFAULT 0,
+        total_pp REAL DEFAULT 0,
+        weighted_pp REAL DEFAULT 0,
+        first_places INTEGER DEFAULT 0,
+        top_10_places INTEGER DEFAULT 0,
+        accuracy_avg REAL DEFAULT 0,
+        playcount INTEGER DEFAULT 0,
+        total_playtime INTEGER DEFAULT 0,
+        level REAL DEFAULT 1,
+        global_rank INTEGER DEFAULT 0,
+        country_rank INTEGER DEFAULT 0,
+        join_date BIGINT,
+        last_seen BIGINT,
+        last_calculated BIGINT DEFAULT 0,
+        is_active BOOLEAN DEFAULT true,
+        avatar_url TEXT,
+        cover_url TEXT
+      );
+    `);
+
+    // Skill tracking system
+    await query(`
+      CREATE TABLE IF NOT EXISTS skill_tracking (
+        id SERIAL PRIMARY KEY,
+        username TEXT,
+        skill_type TEXT,
+        skill_value REAL,
+        confidence REAL DEFAULT 0.5,
+        calculated_at BIGINT,
+        FOREIGN KEY (username) REFERENCES player_stats(username) ON DELETE CASCADE
+      );
+    `);
+
+    // Achievements system
+    await query(`
+      CREATE TABLE IF NOT EXISTS achievements (
+        id SERIAL PRIMARY KEY,
+        name TEXT UNIQUE,
+        description TEXT,
+        category TEXT,
+        icon TEXT,
+        points INTEGER DEFAULT 0,
+        created_at BIGINT DEFAULT EXTRACT(EPOCH FROM NOW()) * 1000
+      );
+    `);
+
+    await query(`
+      CREATE TABLE IF NOT EXISTS player_achievements (
+        id SERIAL PRIMARY KEY,
+        username TEXT,
+        achievement_id INTEGER,
+        unlocked_at BIGINT DEFAULT EXTRACT(EPOCH FROM NOW()) * 1000,
+        progress REAL DEFAULT 1.0,
+        FOREIGN KEY (username) REFERENCES player_stats(username) ON DELETE CASCADE,
+        FOREIGN KEY (achievement_id) REFERENCES achievements(id),
+        UNIQUE(username, achievement_id)
+      );
+    `);
+
+    // Activity tracking
+    await query(`
+      CREATE TABLE IF NOT EXISTS player_activity (
+        id SERIAL PRIMARY KEY,
+        username TEXT,
+        activity_type TEXT,
+        activity_data JSONB,
+        timestamp BIGINT DEFAULT EXTRACT(EPOCH FROM NOW()) * 1000,
+        FOREIGN KEY (username) REFERENCES player_stats(username) ON DELETE CASCADE
+      );
+    `);
+
+    // Daily statistics
+    await query(`
+      CREATE TABLE IF NOT EXISTS daily_stats (
+        date DATE PRIMARY KEY,
+        active_players INTEGER DEFAULT 0,
+        new_scores INTEGER DEFAULT 0,
+        new_players INTEGER DEFAULT 0,
+        total_pp_gained REAL DEFAULT 0,
+        average_accuracy REAL DEFAULT 0,
+        top_score BIGINT DEFAULT 0
+      );
+    `);
+
+    // Beatmap metadata
+    await query(`
+      CREATE TABLE IF NOT EXISTS beatmap_metadata (
+        beatmap_id BIGINT PRIMARY KEY,
+        beatmapset_id BIGINT,
+        artist TEXT,
+        title TEXT,
+        version TEXT,
+        creator TEXT,
+        difficulty_rating REAL,
+        cs REAL,
+        ar REAL,
+        od REAL,
+        hp REAL,
+        length INTEGER,
+        bpm REAL,
+        max_combo INTEGER,
+        tags TEXT[],
+        genre_id INTEGER,
+        language_id INTEGER,
+        play_count INTEGER DEFAULT 0,
+        favorite_count INTEGER DEFAULT 0,
+        ranked_date BIGINT,
+        last_updated BIGINT
+      );
+    `);
+
+    // Player discovery tables
+    await query(`
+      CREATE TABLE IF NOT EXISTS player_discovery_log (
+        id SERIAL PRIMARY KEY,
+        username TEXT,
+        user_id BIGINT,
+        discovery_method TEXT,
+        discovery_timestamp BIGINT DEFAULT EXTRACT(EPOCH FROM NOW()) * 1000,
+        is_new_player BOOLEAN DEFAULT false,
+        player_data JSONB
+      );
+    `);
+
+    // Social features
+    await query(`
+      CREATE TABLE IF NOT EXISTS player_relationships (
+        id SERIAL PRIMARY KEY,
+        follower_username TEXT,
+        following_username TEXT,
+        relationship_type TEXT DEFAULT 'follow',
+        created_at BIGINT DEFAULT EXTRACT(EPOCH FROM NOW()) * 1000,
+        FOREIGN KEY (follower_username) REFERENCES player_stats(username) ON DELETE CASCADE,
+        FOREIGN KEY (following_username) REFERENCES player_stats(username) ON DELETE CASCADE,
+        UNIQUE(follower_username, following_username)
+      );
+    `);
+
+    await query(`
+      CREATE TABLE IF NOT EXISTS player_comments (
+        id SERIAL PRIMARY KEY,
+        target_username TEXT,
+        commenter_username TEXT,
+        comment_text TEXT,
+        created_at BIGINT DEFAULT EXTRACT(EPOCH FROM NOW()) * 1000,
+        is_deleted BOOLEAN DEFAULT false,
+        FOREIGN KEY (target_username) REFERENCES player_stats(username) ON DELETE CASCADE,
+        FOREIGN KEY (commenter_username) REFERENCES player_stats(username) ON DELETE CASCADE
+      );
+    `);
+
+    // Create indexes for performance
+    const indexes = [
+      'CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_algeria_score ON algeria_top50(score DESC)',
+      'CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_algeria_rank ON algeria_top50(rank ASC)',
+      'CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_algeria_pp ON algeria_top50(pp DESC)',
+      'CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_algeria_updated ON algeria_top50(last_updated DESC)',
+      'CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_algeria_username ON algeria_top50(username)',
+      'CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_algeria_beatmap ON algeria_top50(beatmap_id)',
+      'CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_player_stats_pp ON player_stats(weighted_pp DESC)',
+      'CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_player_activity_time ON player_activity(timestamp DESC)',
+      'CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_skill_tracking_username ON skill_tracking(username)',
+      'CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_discovery_log_timestamp ON player_discovery_log(discovery_timestamp DESC)',
+      'CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_beatmap_metadata_difficulty ON beatmap_metadata(difficulty_rating)'
+    ];
+
+    for (const indexSql of indexes) {
+      try {
+        await query(indexSql);
+      } catch (err) {
+        if (!err.message.includes('already exists')) {
+          log('WARN', 'Index creation failed:', err.message);
+        }
+      }
+    }
+
+    await insertDefaultAchievements();
+    log('INFO', '✅ Database schema ensured');
+  } catch (err) {
+    log('ERROR', '❌ Database setup failed:', err.message);
+    throw err;
+  }
+}
+
+// Default achievements
+async function insertDefaultAchievements() {
+  const achievements = [
+    { name: 'First Steps', description: 'Set your first score', category: 'milestone', icon: '🎯', points: 10 },
+    { name: 'Century Club', description: 'Achieve 100 total scores', category: 'milestone', icon: '💯', points: 50 },
+    { name: 'Perfectionist', description: 'Get your first SS rank', category: 'accuracy', icon: '✨', points: 100 },
+    { name: 'Speed Demon', description: 'Get a score with DT mod', category: 'mods', icon: '⚡', points: 25 },
+    { name: 'Precision Master', description: 'Get a score with HR mod', category: 'mods', icon: '🎯', points: 25 },
+    { name: 'In the Dark', description: 'Get a score with HD mod', category: 'mods', icon: '🌑', points: 25 },
+    { name: 'Top Player', description: 'Reach #1 on any beatmap', category: 'ranking', icon: '👑', points: 200 },
+    { name: 'Consistency King', description: 'Set scores on 5 consecutive days', category: 'activity', icon: '📅', points: 75 },
+    { name: 'PP Collector', description: 'Reach 1000 total PP', category: 'performance', icon: '💎', points: 150 },
+    { name: 'Dedication', description: 'Play for 100 hours total', category: 'activity', icon: '⏰', points: 100 }
+  ];
+
+  for (const achievement of achievements) {
+    await query(`
+      INSERT INTO achievements (name, description, category, icon, points)
+      VALUES ($1, $2, $3, $4, $5)
+      ON CONFLICT (name) DO NOTHING
+    `, [achievement.name, achievement.description, achievement.category, achievement.icon, achievement.points]);
+  }
+}
+
+// ==================== PLAYER DISCOVERY SYSTEM ====================
+class PlayerDiscoveryService {
+  constructor() {
+    this.discoveryMethods = [
+      'country_rankings',
+      'recent_activity', 
+      'user_search',
+      'multiplayer_matches'
+    ];
+  }
+
+  // Method 1: Monitor Algeria country rankings
+  async discoverFromCountryRankings() {
+    try {
+      const token = await getAccessToken();
+      let cursor = null;
+      let page = 1;
+      const maxPages = 10;
+      let totalFound = 0;
+
+      while (page <= maxPages) {
+        const params = {
+          country: 'DZ',
+          mode: 'osu',
+          type: 'performance'
+        };
+        
+        if (cursor) params.cursor_string = cursor;
+
+        const response = await axios.get('https://osu.ppy.sh/api/v2/rankings/osu/performance', {
+          headers: { Authorization: `Bearer ${token}` },
+          params
+        });
+
+        const rankings = response.data.ranking || [];
+        if (rankings.length === 0) break;
+
+        for (const playerRanking of rankings) {
+          const registered = await this.registerPlayer(playerRanking.user, 'country_rankings');
+          if (registered) totalFound++;
+        }
+
+        cursor = response.data.cursor?.page;
+        if (!cursor) break;
+        
+        page++;
+        await new Promise(resolve => setTimeout(resolve, 1000));
+      }
+
+      log('INFO', `🇩🇿 Country rankings: found ${totalFound} players (${page-1} pages)`);
+      return totalFound;
+    } catch (err) {
+      log('ERROR', '❌ Country rankings discovery failed:', err.message);
+      return 0;
+    }
+  }
+
+  // Method 2: Monitor recent scores from popular beatmaps
+  async discoverFromRecentScores() {
+    try {
+      const popularBeatmaps = await getRows(`
+        SELECT beatmap_id, COUNT(DISTINCT username) as player_count
+        FROM algeria_top50 
+        GROUP BY beatmap_id 
+        ORDER BY player_count DESC 
+        LIMIT 30
+      `);
+
+      const token = await getAccessToken();
+      let totalFound = 0;
+
+      for (const beatmap of popularBeatmaps) {
+        try {
+          const response = await axios.get(
+            `https://osu.ppy.sh/api/v2/beatmaps/${beatmap.beatmap_id}/scores`,
+            {
+              headers: { Authorization: `Bearer ${token}` },
+              params: { limit: 50 }
+            }
+          );
+
+          const scores = response.data.scores || [];
+          const algerianScores = scores.filter(score => 
+            score.user?.country?.code === 'DZ'
+          );
+
+          for (const score of algerianScores) {
+            const registered = await this.registerPlayer(score.user, 'recent_scores');
+            if (registered) totalFound++;
+          }
+
+          await new Promise(resolve => setTimeout(resolve, 800));
+        } catch (err) {
+          log('WARN', `Failed to check beatmap ${beatmap.beatmap_id}:`, err.message);
+        }
+      }
+
+      log('INFO', `📊 Recent scores: found ${totalFound} new players`);
+      return totalFound;
+    } catch (err) {
+      log('ERROR', '❌ Recent scores discovery failed:', err.message);
+      return 0;
+    }
+  }
+
+  // Method 3: Search for Algerian players
+  async discoverFromUserSearch() {
+    try {
+      const token = await getAccessToken();
+      let totalFound = 0;
+      
+      const searchTerms = ['algeria', 'dz', 'algerie'];
+
+      for (const term of searchTerms) {
+        try {
+          const response = await axios.get('https://osu.ppy.sh/api/v2/search', {
+            headers: { Authorization: `Bearer ${token}` },
+            params: {
+              mode: 'user',
+              query: term
+            }
+          });
+
+          const users = response.data.user?.data || [];
+          const algerianUsers = users.filter(user => 
+            user.country?.code === 'DZ'
+          );
+
+          for (const user of algerianUsers) {
+            const registered = await this.registerPlayer(user, 'user_search');
+            if (registered) totalFound++;
+          }
+
+          await new Promise(resolve => setTimeout(resolve, 2000));
+        } catch (err) {
+          log('WARN', `Search term '${term}' failed:`, err.message);
+        }
+      }
+
+      log('INFO', `🔍 User search: found ${totalFound} new players`);
+      return totalFound;
+    } catch (err) {
+      log('ERROR', '❌ User search discovery failed:', err.message);
+      return 0;
+    }
+  }
+
+  // Core player registration
+  async registerPlayer(userData, discoveryMethod = 'unknown') {
+    try {
+      if (!userData || !userData.id || userData.country?.code !== 'DZ') {
+        return false;
+      }
+
+      // Check if player already exists
+      const existingPlayer = await getRow(`
+        SELECT username, last_seen FROM player_stats 
+        WHERE user_id = $1 OR username ILIKE $2
+      `, [userData.id, userData.username]);
+
+      const now = Date.now();
+      const isNewPlayer = !existingPlayer;
+
+      if (isNewPlayer) {
+        log('INFO', `🆕 New Algerian player: ${userData.username} (${discoveryMethod})`);
+        
+        // Send Discord notification
+        if (process.env.DISCORD_WEBHOOK_URL) {
+          await this.sendNewPlayerNotification(userData, discoveryMethod);
+        }
+
+        // Broadcast to clients
+        broadcastToClients({
+          type: 'new_player_discovered',
+          player: {
+            username: userData.username,
+            userId: userData.id,
+            discoveryMethod,
+            timestamp: now
+          }
+        });
+      }
+
+      // Insert/update player
+      await query(`
+        INSERT INTO player_stats (
+          username, user_id, join_date, last_seen, avatar_url, cover_url,
+          global_rank, country_rank, level, playcount, total_playtime, is_active
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, true)
+        ON CONFLICT (username) DO UPDATE SET
+          user_id = COALESCE(EXCLUDED.user_id, player_stats.user_id),
+          last_seen = EXCLUDED.last_seen,
+          avatar_url = COALESCE(EXCLUDED.avatar_url, player_stats.avatar_url),
+          cover_url = COALESCE(EXCLUDED.cover_url, player_stats.cover_url),
+          global_rank = COALESCE(EXCLUDED.global_rank, player_stats.global_rank),
+          country_rank = COALESCE(EXCLUDED.country_rank, player_stats.country_rank),
+          level = COALESCE(EXCLUDED.level, player_stats.level),
+          playcount = COALESCE(EXCLUDED.playcount, player_stats.playcount),
+          total_playtime = COALESCE(EXCLUDED.total_playtime, player_stats.total_playtime),
+          is_active = true
+      `, [
+        userData.username,
+        userData.id,
+        userData.join_date ? new Date(userData.join_date).getTime() : now,
+        now,
+        userData.avatar_url,
+        userData.cover_url || userData.cover?.url,
+        userData.statistics?.global_rank,
+        userData.statistics?.country_rank,
+        userData.statistics?.level?.current,
+        userData.statistics?.play_count,
+        userData.statistics?.play_time
+      ]);
+
+      // Log discovery
+      await query(`
+        INSERT INTO player_discovery_log (username, user_id, discovery_method, is_new_player, player_data)
+        VALUES ($1, $2, $3, $4, $5)
+      `, [
+        userData.username,
+        userData.id,
+        discoveryMethod,
+        isNewPlayer,
+        JSON.stringify(userData)
+      ]);
+
+      // If new player, fetch their history
+      if (isNewPlayer) {
+        setTimeout(() => {
+          this.fetchPlayerHistory(userData.username, userData.id);
+        }, 5000);
+      }
+
+      return isNewPlayer;
+    } catch (err) {
+      log('ERROR', `❌ Failed to register ${userData?.username}:`, err.message);
+      return false;
+    }
+  }
+
+  // Fetch comprehensive player history
+  async fetchPlayerHistory(username, userId) {
+    try {
+      log('INFO', `📥 Fetching history for ${username}`);
+      
+      const token = await getAccessToken();
+      
+      // Get best scores
+      const bestResponse = await axios.get(
+        `https://osu.ppy.sh/api/v2/users/${userId}/scores/best`,
+        {
+          headers: { Authorization: `Bearer ${token}` },
+          params: { limit: 100, mode: 'osu' }
+        }
+      );
+
+      const bestScores = bestResponse.data || [];
+      
+      // Process scores for leaderboard positions
+      let processedScores = 0;
+      for (const score of bestScores.slice(0, 50)) { // Limit to avoid rate limits
+        try {
+          await limiter.schedule(() => 
+            this.checkScoreOnLeaderboard(score, username)
+          );
+          processedScores++;
+        } catch (err) {
+          log('WARN', `Failed to process score on beatmap ${score.beatmap.id}:`, err.message);
+        }
+      }
+
+      await this.updatePlayerStats(username, bestScores);
+      await checkAchievements(username);
+      
+      log('INFO', `✅ Completed history fetch for ${username} (${processedScores} scores)`);
+      
+    } catch (err) {
+      log('ERROR', `❌ Failed to fetch history for ${username}:`, err.message);
+    }
+  }
+
+  // Check if score appears on leaderboard
+  async checkScoreOnLeaderboard(score, expectedUsername) {
+    try {
+      const token = await getAccessToken();
+      
+      const response = await axios.get(
+        `https://osu.ppy.sh/api/v2/beatmaps/${score.beatmap.id}/scores`,
+        {
+          headers: { Authorization: `Bearer ${token}` },
+          params: { limit: 50 }
+        }
+      );
+
+      const leaderboardScores = response.data.scores || [];
+      const algerianScores = leaderboardScores.filter(s => 
+        s.user?.country?.code === 'DZ'
+      );
+
+      if (algerianScores.length > 0) {
+        const beatmapTitle = `${score.beatmapset.artist} - ${score.beatmapset.title} [${score.beatmap.version}]`;
+        await saveBeatmapScores(score.beatmap.id, beatmapTitle, algerianScores, score.beatmap);
+      }
+
+    } catch (err) {
+      // Silently handle - this is expected for many beatmaps
+    }
+  }
+
+  // Update player statistics
+  async updatePlayerStats(username, scores) {
+    try {
+      if (scores.length === 0) return;
+
+      const totalPP = scores.reduce((sum, s) => sum + (s.pp || 0), 0);
+      const avgAccuracy = scores.reduce((sum, s) => sum + (s.accuracy || 0), 0) / scores.length;
+      const bestScore = Math.max(...scores.map(s => s.score || 0));
+      
+      // Calculate weighted PP
+      const weightedPP = scores.reduce((sum, score, index) => {
+        return sum + (score.pp || 0) * Math.pow(0.95, index);
+      }, 0);
+
+      await query(`
+        UPDATE player_stats SET
+          total_pp = $2,
+          weighted_pp = $3,
+          accuracy_avg = $4,
+          best_score = $5,
+          playcount = $6,
+          last_calculated = $7
+        WHERE username = $1
+      `, [username, totalPP, weightedPP, avgAccuracy, bestScore, scores.length, Date.now()]);
+
+    } catch (err) {
+      log('ERROR', `Failed to update stats for ${username}:`, err.message);
+    }
+  }
+
+  // Discord notification
+  async sendNewPlayerNotification(userData, discoveryMethod) {
+    if (!process.env.DISCORD_WEBHOOK_URL) return;
+    
+    try {
+      const embed = {
+        title: "New Algerian Player Discovered! 🇩🇿✨",
+        description: `Welcome **${userData.username}** to the Algeria osu! community!`,
+        fields: [
+          { name: "Player", value: `[${userData.username}](https://osu.ppy.sh/users/${userData.id})`, inline: true },
+          { name: "Discovery", value: discoveryMethod.replace('_', ' '), inline: true },
+          { name: "Rank", value: `#${userData.statistics?.country_rank || 'N/A'} DZ`, inline: true }
+        ],
+        color: 0x00ff88,
+        timestamp: new Date().toISOString(),
+        thumbnail: { url: userData.avatar_url },
+        footer: { text: "Algeria osu! Leaderboards" }
+      };
+
+      await axios.post(process.env.DISCORD_WEBHOOK_URL, { embeds: [embed] });
+    } catch (err) {
+      log('ERROR', 'Discord notification failed:', err.message);
+    }
+  }
+
+  // Run complete discovery
+  async runDiscovery() {
+    log('INFO', '🔍 Starting player discovery...');
+    
+    const startTime = Date.now();
+    const results = {
+      countryRankings: await this.discoverFromCountryRankings(),
+      recentScores: await this.discoverFromRecentScores(),
+      userSearch: await this.discoverFromUserSearch(),
+      multiplayerMatches: await this.discoverFromMultiplayerMatches()
+    };
+
+    const total = Object.values(results).reduce((sum, count) => sum + count, 0);
+    const duration = ((Date.now() - startTime) / 1000).toFixed(2);
+    
+    log('INFO', `✅ Discovery completed in ${duration}s - Found ${total} new players`);
+    
+    broadcastToClients({
+      type: 'discovery_complete',
+      results,
+      total,
+      duration,
+      timestamp: Date.now()
+    });
+
+    return results;
+  }
+
+  // Method 4: Discover players from recent multiplayer matches
+  async discoverFromMultiplayerMatches() {
+    try {
+      const token = await getAccessToken();
+      let totalFound = 0;
+      let matchIds = [];
+      try {
+        const res = await axios.get('https://osu.ppy.sh/api/v2/multiplayer/matches', {
+          headers: { Authorization: `Bearer ${token}` },
+          params: { limit: 30 }
+        });
+        if (Array.isArray(res.data.matches)) {
+          matchIds = res.data.matches.map(m => m.id).slice(0, 30);
+        }
+      } catch (e) {
+        log('DEBUG', 'Multiplayer match list endpoint failed, will attempt alternative scanning');
+      }
+
+      if (matchIds.length === 0) {
+        const recentBeatmaps = await getRows(`
+          SELECT beatmap_id FROM beatmap_metadata
+          ORDER BY last_updated DESC
+          LIMIT 20
+        `);
+        for (const bm of recentBeatmaps) {
+          try {
+            const res = await axios.get(`https://osu.ppy.sh/api/v2/beatmaps/${bm.beatmap_id}/multiplayer`, {
+              headers: { Authorization: `Bearer ${token}` },
+              params: { limit: 10 }
+            });
+            if (res.data.matches) {
+              for (const m of res.data.matches) {
+                if (m.id) matchIds.push(m.id);
+              }
+            }
+            await new Promise(r => setTimeout(r, 400));
+          } catch (err) {
+            // ignore per-beatmap errors
+          }
+        }
+      }
+
+      for (const matchId of [...new Set(matchIds)].slice(0, 60)) {
+        try {
+          const res = await axios.get(`https://osu.ppy.sh/api/v2/multiplayer/matches/${matchId}`, {
+            headers: { Authorization: `Bearer ${token}` }
+          });
+          const match = res.data;
+          const participants = match?.matches ? (match.matches.flatMap(x => x.scores || [])) : (match?.scores || []);
+          if (Array.isArray(participants)) {
+            for (const p of participants) {
+              const u = p.user || p;
+              if (u && u.country?.code === 'DZ') {
+                const registered = await this.registerPlayer(u, 'multiplayer_matches');
+                if (registered) totalFound++;
+              }
+            }
+          }
+          await new Promise(r => setTimeout(r, 500));
+        } catch (err) {
+          log('DEBUG', `Multiplayer match ${matchId} fetch failed: ${err.message}`);
+        }
+      }
+
+      log('INFO', `🎮 Multiplayer discovery: found ${totalFound} players`);
+      return totalFound;
+    } catch (err) {
+      log('ERROR', 'Multiplayer discovery failed:', err.message);
+      return 0;
+    }
+  }
+
+
+// Initialize player discovery
+const playerDiscovery = new PlayerDiscoveryService();
+
+// ==================== SKILL CALCULATION SYSTEM ====================
 class SkillCalculator {
   static calculateAimSkill(scores) {
-    // Calculate aim skill based on high AR, jump patterns, and cursor movement
     const aimScores = scores.filter(s => s.mods?.includes('HR') || s.difficulty_rating > 5.0);
     if (aimScores.length === 0) return 0;
     
@@ -417,7 +922,6 @@ class SkillCalculator {
   }
 
   static calculateSpeedSkill(scores) {
-    // Calculate speed skill based on BPM, DT usage, and streaming capability
     const speedScores = scores.filter(s => s.mods?.includes('DT') || s.difficulty_rating > 4.5);
     if (speedScores.length === 0) return 0;
     
@@ -429,7 +933,6 @@ class SkillCalculator {
   }
 
   static calculateAccuracySkill(scores) {
-    // Calculate accuracy skill based on consistent high accuracy
     if (scores.length === 0) return 0;
     
     const avgAccuracy = scores.reduce((sum, s) => sum + (s.accuracy || 0), 0) / scores.length;
@@ -440,7 +943,6 @@ class SkillCalculator {
   }
 
   static calculateReadingSkill(scores) {
-    // Calculate reading skill based on AR, HD usage, and complex patterns
     const readingScores = scores.filter(s => s.mods?.includes('HD') || s.mods?.includes('HR'));
     if (readingScores.length === 0) return Math.min(10, scores.length * 0.1);
     
@@ -452,7 +954,6 @@ class SkillCalculator {
   }
 
   static calculateConsistencySkill(scores) {
-    // Calculate consistency based on score distribution and miss count
     if (scores.length < 5) return 0;
     
     const missRates = scores.map(s => (s.count_miss || 0) / Math.max(1, s.max_combo || 100));
@@ -463,7 +964,7 @@ class SkillCalculator {
   }
 }
 
-// Achievement checking system
+// ==================== ACHIEVEMENT SYSTEM ====================
 async function checkAchievements(username) {
   try {
     const playerScores = await getRows(`
@@ -477,24 +978,15 @@ async function checkAchievements(username) {
     if (!playerStats) return;
 
     const achievementChecks = [
-      // Milestone achievements
       { name: 'First Steps', condition: () => playerScores.length >= 1 },
       { name: 'Century Club', condition: () => playerScores.length >= 100 },
       { name: 'PP Collector', condition: () => (playerStats.total_pp || 0) >= 1000 },
-      
-      // Accuracy achievements
       { name: 'Perfectionist', condition: () => playerScores.some(s => (s.accuracy || 0) >= 1.0) },
-      
-      // Mod achievements
       { name: 'Speed Demon', condition: () => playerScores.some(s => s.mods?.includes('DT')) },
       { name: 'Precision Master', condition: () => playerScores.some(s => s.mods?.includes('HR')) },
       { name: 'In the Dark', condition: () => playerScores.some(s => s.mods?.includes('HD')) },
-      
-      // Ranking achievements
       { name: 'Top Player', condition: () => playerScores.some(s => s.rank === 1) },
-      
-      // Performance achievements
-      { name: 'Dedication', condition: () => (playerStats.total_playtime || 0) >= 360000 } // 100 hours in seconds
+      { name: 'Dedication', condition: () => (playerStats.total_playtime || 0) >= 360000 }
     ];
 
     for (const check of achievementChecks) {
@@ -513,9 +1005,9 @@ async function checkAchievements(username) {
   }
 }
 
-// Enhanced leaderboard fetching with comprehensive data
+// ==================== LEADERBOARD FETCHING ====================
 async function fetchLeaderboard(beatmapId, beatmapTitle) {
-  const maxRetries = 4;
+  const maxRetries = 3;
   let attempt = 0;
   
   while (attempt < maxRetries) {
@@ -538,7 +1030,6 @@ async function fetchLeaderboard(beatmapId, beatmapTitle) {
       if (algerianScores.length > 0) {
         await saveBeatmapScores(beatmapId, beatmapTitle, algerianScores, beatmapInfo);
         
-        // Real-time update broadcast
         broadcastToClients({
           type: 'new_scores',
           beatmapId,
@@ -556,15 +1047,17 @@ async function fetchLeaderboard(beatmapId, beatmapTitle) {
       
     } catch (err) {
       attempt++;
-      if (attempt >= maxRetries) break;
+      if (attempt >= maxRetries) {
+        log('WARN', `Failed to fetch ${beatmapId} after ${maxRetries} attempts:`, err.message);
+        break;
+      }
       
-      const backoffTime = Math.min(1000 * Math.pow(2, attempt), 30000);
+      const backoffTime = Math.min(1000 * Math.pow(2, attempt), 10000);
       await new Promise(resolve => setTimeout(resolve, backoffTime));
     }
   }
 }
 
-// Enhanced score saving with activity tracking
 async function saveBeatmapScores(beatmapId, beatmapTitle, algerianScores, beatmapInfo) {
   const now = Date.now();
   const client = await pool.connect();
@@ -576,7 +1069,7 @@ async function saveBeatmapScores(beatmapId, beatmapTitle, algerianScores, beatma
       const s = algerianScores[i];
       const mods = s.mods?.length ? s.mods.join(',') : 'None';
       
-      // Check if this is a new #1 score
+      // Check for new #1 score
       const existingTop = await client.query(
         'SELECT username, rank FROM algeria_top50 WHERE beatmap_id = $1 ORDER BY rank ASC LIMIT 1',
         [beatmapId]
@@ -622,7 +1115,6 @@ async function saveBeatmapScores(beatmapId, beatmapTitle, algerianScores, beatma
         new Date(s.created_at).getTime(), now
       ]);
       
-      // Track activity for new #1 scores
       if (isNewFirst) {
         await client.query(`
           INSERT INTO player_activity (username, activity_type, activity_data)
@@ -631,7 +1123,6 @@ async function saveBeatmapScores(beatmapId, beatmapTitle, algerianScores, beatma
           beatmapId, beatmapTitle, score: s.score, pp: s.pp, mods
         })]);
         
-        // Send Discord notification
         if (process.env.DISCORD_WEBHOOK_URL) {
           await sendDiscordNotification(s, beatmapTitle, beatmapId, 'new_first');
         }
@@ -646,7 +1137,6 @@ async function saveBeatmapScores(beatmapId, beatmapTitle, algerianScores, beatma
       await checkAchievements(score.user.username);
     }
     
-    // Invalidate relevant caches
     await invalidateCache(`leaderboard:*`);
     await invalidateCache(`player:*`);
     
@@ -658,93 +1148,6 @@ async function saveBeatmapScores(beatmapId, beatmapTitle, algerianScores, beatma
   }
 }
 
-// Comprehensive player stats calculation
-async function updatePlayerStats(username) {
-  try {
-    const playerScores = await getRows(`
-      SELECT * FROM algeria_top50 WHERE username = $1
-    `, [username]);
-    
-    if (playerScores.length === 0) return;
-    
-    const now = Date.now();
-    const totalScores = playerScores.length;
-    const avgRank = playerScores.reduce((sum, s) => sum + s.rank, 0) / totalScores;
-    const bestScore = Math.max(...playerScores.map(s => s.score));
-    const totalPP = playerScores.reduce((sum, s) => sum + (s.pp || 0), 0);
-    const firstPlaces = playerScores.filter(s => s.rank === 1).length;
-    const top10Places = playerScores.filter(s => s.rank <= 10).length;
-    const avgAccuracy = playerScores.reduce((sum, s) => sum + (s.accuracy || 0), 0) / totalScores;
-    
-    // Calculate weighted PP (similar to osu!'s system)
-    const sortedByPP = playerScores.sort((a, b) => (b.pp || 0) - (a.pp || 0));
-    const weightedPP = sortedByPP.reduce((sum, score, index) => {
-      return sum + (score.pp || 0) * Math.pow(0.95, index);
-    }, 0);
-    
-    await query(`
-      INSERT INTO player_stats (
-        username, total_scores, avg_rank, best_score, total_pp, weighted_pp,
-        first_places, top_10_places, accuracy_avg, last_calculated
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-      ON CONFLICT (username) DO UPDATE SET
-        total_scores = EXCLUDED.total_scores,
-        avg_rank = EXCLUDED.avg_rank,
-        best_score = EXCLUDED.best_score,
-        total_pp = EXCLUDED.total_pp,
-        weighted_pp = EXCLUDED.weighted_pp,
-        first_places = EXCLUDED.first_places,
-        top_10_places = EXCLUDED.top_10_places,
-        accuracy_avg = EXCLUDED.accuracy_avg,
-        last_calculated = EXCLUDED.last_calculated
-    `, [username, totalScores, avgRank, bestScore, totalPP, weightedPP, 
-        firstPlaces, top10Places, avgAccuracy, now]);
-    
-    // Calculate and update skill ratings
-    await updatePlayerSkills(username, playerScores);
-    
-  } catch (err) {
-    log('ERROR', 'Player stats update failed:', err.message);
-  }
-}
-
-// Skill tracking update
-async function updatePlayerSkills(username, playerScores) {
-  try {
-    const skills = {
-      aim: SkillCalculator.calculateAimSkill(playerScores),
-      speed: SkillCalculator.calculateSpeedSkill(playerScores),
-      accuracy: SkillCalculator.calculateAccuracySkill(playerScores),
-      reading: SkillCalculator.calculateReadingSkill(playerScores),
-      consistency: SkillCalculator.calculateConsistencySkill(playerScores)
-    };
-    
-    const now = Date.now();
-    
-    for (const [skillType, skillValue] of Object.entries(skills)) {
-      await query(`
-        INSERT INTO skill_tracking (username, skill_type, skill_value, calculated_at)
-        VALUES ($1, $2, $3, $4)
-      `, [username, skillType, skillValue, now]);
-    }
-    
-    // Keep only last 30 skill entries per player per skill type
-    await query(`
-      DELETE FROM skill_tracking 
-      WHERE username = $1 AND id NOT IN (
-        SELECT id FROM skill_tracking 
-        WHERE username = $1 
-        ORDER BY calculated_at DESC 
-        LIMIT 150
-      )
-    `, [username]);
-    
-  } catch (err) {
-    log('ERROR', 'Skill tracking update failed:', err.message);
-  }
-}
-
-// Beatmap metadata saving
 async function saveBeatmapMetadata(beatmapInfo) {
   try {
     const beatmapset = beatmapInfo.beatmapset || {};
@@ -785,32 +1188,109 @@ async function saveBeatmapMetadata(beatmapInfo) {
   }
 }
 
-// Enhanced Discord notifications
+async function updatePlayerStats(username) {
+  try {
+    const playerScores = await getRows(`
+      SELECT * FROM algeria_top50 WHERE username = $1
+    `, [username]);
+    
+    if (playerScores.length === 0) return;
+    
+    const now = Date.now();
+    const totalScores = playerScores.length;
+    const avgRank = playerScores.reduce((sum, s) => sum + s.rank, 0) / totalScores;
+    const bestScore = Math.max(...playerScores.map(s => s.score));
+    const totalPP = playerScores.reduce((sum, s) => sum + (s.pp || 0), 0);
+    const firstPlaces = playerScores.filter(s => s.rank === 1).length;
+    const top10Places = playerScores.filter(s => s.rank <= 10).length;
+    const avgAccuracy = playerScores.reduce((sum, s) => sum + (s.accuracy || 0), 0) / totalScores;
+    
+    const sortedByPP = playerScores.sort((a, b) => (b.pp || 0) - (a.pp || 0));
+    const weightedPP = sortedByPP.reduce((sum, score, index) => {
+      return sum + (score.pp || 0) * Math.pow(0.95, index);
+    }, 0);
+    
+    await query(`
+      INSERT INTO player_stats (
+        username, total_scores, avg_rank, best_score, total_pp, weighted_pp,
+        first_places, top_10_places, accuracy_avg, last_calculated
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+      ON CONFLICT (username) DO UPDATE SET
+        total_scores = EXCLUDED.total_scores,
+        avg_rank = EXCLUDED.avg_rank,
+        best_score = EXCLUDED.best_score,
+        total_pp = EXCLUDED.total_pp,
+        weighted_pp = EXCLUDED.weighted_pp,
+        first_places = EXCLUDED.first_places,
+        top_10_places = EXCLUDED.top_10_places,
+        accuracy_avg = EXCLUDED.accuracy_avg,
+        last_calculated = EXCLUDED.last_calculated
+    `, [username, totalScores, avgRank, bestScore, totalPP, weightedPP, 
+        firstPlaces, top10Places, avgAccuracy, now]);
+    
+    await updatePlayerSkills(username, playerScores);
+    
+  } catch (err) {
+    log('ERROR', 'Player stats update failed:', err.message);
+  }
+}
+
+async function updatePlayerSkills(username, playerScores) {
+  try {
+    const skills = {
+      aim: SkillCalculator.calculateAimSkill(playerScores),
+      speed: SkillCalculator.calculateSpeedSkill(playerScores),
+      accuracy: SkillCalculator.calculateAccuracySkill(playerScores),
+      reading: SkillCalculator.calculateReadingSkill(playerScores),
+      consistency: SkillCalculator.calculateConsistencySkill(playerScores)
+    };
+    
+    const now = Date.now();
+    
+    for (const [skillType, skillValue] of Object.entries(skills)) {
+      await query(`
+        INSERT INTO skill_tracking (username, skill_type, skill_value, calculated_at)
+        VALUES ($1, $2, $3, $4)
+      `, [username, skillType, skillValue, now]);
+    }
+    
+    // Keep only last 30 entries per skill type
+    await query(`
+      DELETE FROM skill_tracking 
+      WHERE username = $1 AND id NOT IN (
+        SELECT id FROM skill_tracking 
+        WHERE username = $1 
+        ORDER BY calculated_at DESC 
+        LIMIT 150
+      )
+    `, [username]);
+    
+  } catch (err) {
+    log('ERROR', 'Skill tracking update failed:', err.message);
+  }
+}
+
 async function sendDiscordNotification(score, beatmapTitle, beatmapId, type = 'new_first') {
   if (!process.env.DISCORD_WEBHOOK_URL) return;
   
   try {
-    let embed;
-    
-    if (type === 'new_first') {
-      embed = {
-        title: "New Algerian #1 Score! 🇩🇿👑",
-        description: `**${score.username}** achieved rank #1!`,
-        fields: [
-          { name: "Beatmap", value: `[${beatmapTitle}](https://osu.ppy.sh/beatmaps/${beatmapId})`, inline: false },
-          { name: "Score", value: Number(score.score).toLocaleString(), inline: true },
-          { name: "Accuracy", value: (score.accuracy * 100).toFixed(2) + '%', inline: true },
-          { name: "Mods", value: score.mods?.join(',') || 'None', inline: true },
-          { name: "PP", value: score.pp ? score.pp.toFixed(0) + 'pp' : 'N/A', inline: true },
-          { name: "Max Combo", value: score.max_combo ? score.max_combo + 'x' : 'N/A', inline: true },
-          { name: "Misses", value: score.statistics?.count_miss || 0, inline: true }
-        ],
-        color: 0xff66aa,
-        timestamp: new Date().toISOString(),
-        thumbnail: { url: `https://a.ppy.sh/${score.user.id}` },
-        footer: { text: "Algeria osu! Leaderboards" }
-      };
-    }
+    const embed = {
+      title: "New Algerian #1 Score! 🇩🇿👑",
+      description: `**${score.username}** achieved rank #1!`,
+      fields: [
+        { name: "Beatmap", value: `[${beatmapTitle}](https://osu.ppy.sh/beatmaps/${beatmapId})`, inline: false },
+        { name: "Score", value: Number(score.score).toLocaleString(), inline: true },
+        { name: "Accuracy", value: (score.accuracy * 100).toFixed(2) + '%', inline: true },
+        { name: "Mods", value: score.mods?.join(',') || 'None', inline: true },
+        { name: "PP", value: score.pp ? score.pp.toFixed(0) + 'pp' : 'N/A', inline: true },
+        { name: "Combo", value: score.max_combo ? score.max_combo + 'x' : 'N/A', inline: true },
+        { name: "Misses", value: score.statistics?.count_miss || 0, inline: true }
+      ],
+      color: 0xff66aa,
+      timestamp: new Date().toISOString(),
+      thumbnail: { url: `https://a.ppy.sh/${score.user.id}` },
+      footer: { text: "Algeria osu! Leaderboards" }
+    };
     
     await axios.post(process.env.DISCORD_WEBHOOK_URL, { embeds: [embed] });
     log('INFO', `📢 Discord notification sent for ${score.username}'s score`);
@@ -819,7 +1299,7 @@ async function sendDiscordNotification(score, beatmapTitle, beatmapId, type = 'n
   }
 }
 
-// Daily statistics calculation
+// ==================== DAILY STATISTICS ====================
 async function calculateDailyStats() {
   try {
     const today = new Date().toISOString().split('T')[0];
@@ -881,61 +1361,121 @@ async function calculateDailyStats() {
   }
 }
 
-// Recommendation engine
-class RecommendationEngine {
-  static async getRecommendedBeatmaps(username, limit = 10) {
-    try {
-      // Get player's skill profile and preferences
-      const playerStats = await getRow(`
-        SELECT * FROM player_stats WHERE username = $1
-      `, [username]);
-      
-      if (!playerStats) return [];
-      
-      const playerScores = await getRows(`
-        SELECT * FROM algeria_top50 WHERE username = $1 ORDER BY pp DESC LIMIT 50
-      `, [username]);
-      
-      const skills = await getRows(`
-        SELECT skill_type, AVG(skill_value) as avg_skill 
-        FROM skill_tracking 
-        WHERE username = $1 
-        GROUP BY skill_type
-      `, [username]);
-      
-      const skillMap = {};
-      skills.forEach(s => skillMap[s.skill_type] = parseFloat(s.avg_skill));
-      
-      // Get player's preferred difficulty range
-      const avgDifficulty = playerScores.reduce((sum, s) => sum + (s.difficulty_rating || 0), 0) / playerScores.length;
-      const difficultyRange = [Math.max(1, avgDifficulty - 1), avgDifficulty + 1.5];
-      
-      // Find beatmaps that match player's skill level but they haven't played
-      const recommendations = await getRows(`
-        SELECT bm.*, COUNT(ats.beatmap_id) as algerian_plays
-        FROM beatmap_metadata bm
-        LEFT JOIN algeria_top50 ats ON bm.beatmap_id = ats.beatmap_id
-        WHERE bm.difficulty_rating BETWEEN $1 AND $2
-        AND bm.beatmap_id NOT IN (
-          SELECT beatmap_id FROM algeria_top50 WHERE username = $3
-        )
-        GROUP BY bm.beatmap_id
-        ORDER BY algerian_plays DESC, bm.favorite_count DESC
-        LIMIT $4
-      `, [difficultyRange[0], difficultyRange[1], username, limit]);
-      
-      return recommendations;
-    } catch (err) {
-      log('ERROR', 'Recommendation generation failed:', err.message);
-      return [];
+// ==================== MAIN UPDATE FUNCTION ====================
+async function updateLeaderboards() {
+  log('INFO', "🔄 Starting leaderboards update...");
+  try {
+    const beatmaps = await getAllBeatmaps();
+    await saveProgress("total_beatmaps", beatmaps.length);
+    
+    // Priority: Update known beatmaps first
+    const priorityBeatmaps = await getRows(`
+      SELECT beatmap_id, MIN(beatmap_title) AS beatmap_title
+      FROM algeria_top50
+      GROUP BY beatmap_id
+      ORDER BY MIN(last_updated) ASC
+      LIMIT 100
+    `);
+    
+    if (priorityBeatmaps.length > 0) {
+      log('INFO', `⚡ Priority scanning ${priorityBeatmaps.length} known beatmaps`);
+      for (const bm of priorityBeatmaps) {
+        await limiter.schedule(() => fetchLeaderboard(bm.beatmap_id, bm.beatmap_title));
+      }
     }
+    
+    // Regular scanning
+    let startIndex = parseInt(await getProgress("last_index") || "0", 10);
+    if (startIndex >= beatmaps.length) {
+      startIndex = 0;
+      await saveProgress("last_index", "0");
+    }
+    
+    log('INFO', `📌 Regular scanning from index ${startIndex}/${beatmaps.length}`);
+    const batchSize = 50; // Reduced for better stability
+    
+    for (let i = startIndex; i < Math.min(startIndex + batchSize, beatmaps.length); i++) {
+      const bm = beatmaps[i];
+      await limiter.schedule(() => fetchLeaderboard(bm.id, bm.title));
+      await saveProgress("last_index", i + 1);
+      
+      if (i % 10 === 0) {
+        broadcastToClients({
+          type: 'scan_progress',
+          progress: {
+            current: i,
+            total: beatmaps.length,
+            percentage: ((i / beatmaps.length) * 100).toFixed(2)
+          }
+        });
+      }
+    }
+    
+    await calculateDailyStats();
+    await invalidateCache('*');
+    
+    log('INFO', "✅ Leaderboard update completed");
+    broadcastToClients({
+      type: 'scan_complete',
+      timestamp: Date.now()
+    });
+  } catch (err) {
+    log('ERROR', '❌ Leaderboard update failed:', err.message);
+    broadcastToClients({
+      type: 'scan_error',
+      error: err.message,
+      timestamp: Date.now()
+    });
   }
 }
 
-// Middleware
+async function getAllBeatmaps() {
+  let allBeatmaps = [];
+  let page = 1;
+  const maxPages = 30; // Reduced for faster scanning
+  
+  while (page <= maxPages) {
+    try {
+      const token = await getAccessToken();
+      const res = await axios.get('https://osu.ppy.sh/api/v2/beatmapsets/search', {
+        headers: { Authorization: `Bearer ${token}` },
+        params: { mode: 'osu', nsfw: false, sort: 'ranked_desc', page, 's': 'ranked' }
+      });
+      
+      const sets = res.data.beatmapsets || [];
+      if (sets.length === 0) break;
+      
+      const beatmaps = sets.flatMap(set =>
+        (set.beatmaps || [])
+          .filter(bm => bm.difficulty_rating >= 2.0)
+          .map(bm => ({ 
+            id: bm.id, 
+            title: `${set.artist} - ${set.title} [${bm.version}]`, 
+            difficulty: bm.difficulty_rating 
+          }))
+      );
+      
+      allBeatmaps.push(...beatmaps);
+      page++;
+      await new Promise(resolve => setTimeout(resolve, 1000));
+    } catch (err) {
+      log('ERROR', `❌ Failed to fetch beatmap page ${page}:`, err.message);
+      break;
+    }
+  }
+  
+  return allBeatmaps;
+}
+
+// ==================== MIDDLEWARE ====================
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '10mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
+
+// Error handler middleware
+const asyncHandler = (fn) => (req, res, next) => {
+  Promise.resolve(fn(req, res, next)).catch(next);
+};
 
 // Authentication middleware
 const authenticateToken = (req, res, next) => {
@@ -951,92 +1491,147 @@ const authenticateToken = (req, res, next) => {
   });
 };
 
-// Enhanced API Endpoints
-
-// Comprehensive leaderboard with advanced filtering
-app.get('/api/leaderboards', async (req, res) => {
-  try {
-    const {
-      limit = 100, offset = 0, sort = 'score', order = 'DESC',
-      minDifficulty = 0, maxDifficulty = 15, mods, player, timeRange, skillLevel
-    } = req.query;
+// Input validation helper
+const validateInput = (rules) => {
+  return (req, res, next) => {
+    const errors = [];
     
-    const cacheKey = `leaderboard:${JSON.stringify(req.query)}`;
-    
-    const data = await getCached(cacheKey, async () => {
-      let whereClause = 'WHERE 1=1';
-      let params = [];
-      let paramCount = 0;
+    Object.entries(rules).forEach(([field, rule]) => {
+      const value = req.params[field] || req.query[field] || req.body[field];
       
-      if (minDifficulty > 0) {
-        whereClause += ` AND difficulty_rating >= $${++paramCount}`;
-        params.push(parseFloat(minDifficulty));
+      if (rule.required && (!value || value.toString().trim() === '')) {
+        errors.push(`${field} is required`);
       }
       
-      if (maxDifficulty < 15) {
-        whereClause += ` AND difficulty_rating <= ${++paramCount}`;
-        params.push(parseFloat(maxDifficulty));
+      if (value && rule.type === 'number' && isNaN(Number(value))) {
+        errors.push(`${field} must be a number`);
       }
       
-      if (mods && mods !== 'all') {
-        whereClause += ` AND mods ILIKE ${++paramCount}`;
-        params.push(`%${mods}%`);
+      if (value && rule.minLength && value.toString().length < rule.minLength) {
+        errors.push(`${field} must be at least ${rule.minLength} characters`);
       }
       
-      if (player) {
-        whereClause += ` AND username ILIKE ${++paramCount}`;
-        params.push(`%${player}%`);
-      }
-      
-      if (timeRange) {
-        const timeRanges = {
-          '24h': 24 * 60 * 60 * 1000,
-          '7d': 7 * 24 * 60 * 60 * 1000,
-          '30d': 30 * 24 * 60 * 60 * 1000
-        };
-        
-        const cutoff = Date.now() - (timeRanges[timeRange] || timeRanges['30d']);
-        whereClause += ` AND last_updated >= ${++paramCount}`;
-        params.push(cutoff);
-      }
-      
-      params.push(parseInt(limit), parseInt(offset));
-      
-      const allowedSort = ['score', 'rank', 'last_updated', 'pp', 'difficulty_rating', 'accuracy'];
-      const sortColumn = allowedSort.includes(sort) ? sort : 'score';
-      const sortOrder = ['ASC', 'DESC'].includes(order.toUpperCase()) ? order.toUpperCase() : 'DESC';
-      
-      return await getRows(
-        `SELECT *, 
-                RANK() OVER (ORDER BY ${sortColumn} ${sortOrder}) as global_rank
-         FROM algeria_top50 
-         ${whereClause}
-         ORDER BY ${sortColumn} ${sortOrder} 
-         LIMIT ${++paramCount} OFFSET ${++paramCount}`,
-        params
-      );
-    }, 180); // 3 minute cache
-    
-    res.json({
-      success: true,
-      data,
-      pagination: {
-        limit: parseInt(limit),
-        offset: parseInt(offset),
-        hasMore: data.length === parseInt(limit)
+      if (value && rule.maxLength && value.toString().length > rule.maxLength) {
+        errors.push(`${field} must be at most ${rule.maxLength} characters`);
       }
     });
-  } catch (err) {
-    log('ERROR', '❌ Leaderboard API error:', err.message);
-    res.status(500).json({ success: false, error: 'Database error' });
-  }
-});
+    
+    if (errors.length > 0) {
+      return res.status(400).json({ success: false, errors });
+    }
+    
+    next();
+  };
+};
 
-// Enhanced player profile with comprehensive stats
-app.get('/api/players/:username', async (req, res) => {
+// ==================== API ENDPOINTS ====================
+
+// Health check
+app.get('/health', asyncHandler(async (req, res) => {
   try {
+    await query('SELECT 1');
+    await redisClient.ping();
+    const token = await getAccessToken();
+    
+    res.json({
+      status: 'healthy',
+      timestamp: new Date().toISOString(),
+      services: {
+        database: 'connected',
+        redis: 'connected',
+        osuApi: token ? 'connected' : 'disconnected'
+      }
+    });
+  } catch (error) {
+    res.status(503).json({
+      status: 'unhealthy',
+      error: error.message
+    });
+  }
+}));
+
+// Enhanced leaderboards endpoint
+app.get('/api/leaderboards', asyncHandler(async (req, res) => {
+  const {
+    limit = 100, offset = 0, sort = 'score', order = 'DESC',
+    minDifficulty = 0, maxDifficulty = 15, mods, player, timeRange
+  } = req.query;
+  
+  const cacheKey = getCacheKey('leaderboard', JSON.stringify(req.query));
+  
+  const data = await getCached(cacheKey, async () => {
+    let whereClause = 'WHERE 1=1';
+    let params = [];
+    let paramCount = 0;
+    
+    if (minDifficulty > 0) {
+      whereClause += ` AND difficulty_rating >= ${++paramCount}`;
+      params.push(parseFloat(minDifficulty));
+    }
+    
+    if (maxDifficulty < 15) {
+      whereClause += ` AND difficulty_rating <= ${++paramCount}`;
+      params.push(parseFloat(maxDifficulty));
+    }
+    
+    if (mods && mods !== 'all') {
+      whereClause += ` AND mods ILIKE ${++paramCount}`;
+      params.push(`%${mods}%`);
+    }
+    
+    if (player) {
+      whereClause += ` AND username ILIKE ${++paramCount}`;
+      params.push(`%${player}%`);
+    }
+    
+    if (timeRange) {
+      const timeRanges = {
+        '24h': 24 * 60 * 60 * 1000,
+        '7d': 7 * 24 * 60 * 60 * 1000,
+        '30d': 30 * 24 * 60 * 60 * 1000
+      };
+      
+      const cutoff = Date.now() - (timeRanges[timeRange] || timeRanges['30d']);
+      whereClause += ` AND last_updated >= ${++paramCount}`;
+      params.push(cutoff);
+    }
+    
+    params.push(parseInt(limit), parseInt(offset));
+    
+    const allowedSort = ['score', 'rank', 'last_updated', 'pp', 'difficulty_rating', 'accuracy'];
+    const sortColumn = allowedSort.includes(sort) ? sort : 'score';
+    const sortOrder = ['ASC', 'DESC'].includes(order.toUpperCase()) ? order.toUpperCase() : 'DESC';
+    
+    return await getRows(
+      `SELECT *, 
+              RANK() OVER (ORDER BY ${sortColumn} ${sortOrder}) as global_rank
+       FROM algeria_top50 
+       ${whereClause}
+       ORDER BY ${sortColumn} ${sortOrder} 
+       LIMIT ${++paramCount} OFFSET ${++paramCount}`,
+      params
+    );
+  }, 180);
+  
+  res.json({
+    success: true,
+    data,
+    pagination: {
+      limit: parseInt(limit),
+      offset: parseInt(offset),
+      hasMore: data.length === parseInt(limit)
+    }
+  });
+}));
+
+// Enhanced player profile endpoint
+app.get('/api/players/:username', 
+  validateInput({
+    username: { required: true, minLength: 2, maxLength: 15 }
+  }),
+  asyncHandler(async (req, res) => {
     const { username } = req.params;
-    const cacheKey = `player:${username.toLowerCase()}`;
+    const cacheKey = getCacheKey('player', username);
     
     const data = await getCached(cacheKey, async () => {
       const [playerStats, recentScores, bestScores, skills, achievements, activity] = await Promise.all([
@@ -1058,7 +1653,7 @@ app.get('/api/players/:username', async (req, res) => {
           FROM skill_tracking 
           WHERE username ILIKE $1 
           ORDER BY calculated_at DESC
-          LIMIT 50
+          LIMIT 25
         `, [`%${username}%`]),
         getRows(`
           SELECT a.name, a.description, a.icon, a.points, pa.unlocked_at
@@ -1072,7 +1667,7 @@ app.get('/api/players/:username', async (req, res) => {
           FROM player_activity
           WHERE username ILIKE $1
           ORDER BY timestamp DESC
-          LIMIT 20
+          LIMIT 10
         `, [`%${username}%`])
       ]);
       
@@ -1106,214 +1701,82 @@ app.get('/api/players/:username', async (req, res) => {
         achievements,
         recentActivity: activity
       };
-    }, 300); // 5 minute cache
+    }, 300);
     
     if (!data) {
       return res.status(404).json({ success: false, error: 'Player not found' });
     }
     
     res.json({ success: true, data });
-  } catch (err) {
-    log('ERROR', '❌ Player profile API error:', err.message);
-    res.status(500).json({ success: false, error: 'Database error' });
-  }
-});
+  })
+);
 
-// Player rankings with multiple sorting options
-app.get('/api/rankings', async (req, res) => {
-  try {
-    const { 
-      sort = 'weighted_pp', 
-      limit = 50, 
-      offset = 0, 
-      timeframe = 'all',
-      minScores = 5 
-    } = req.query;
+// Player rankings endpoint
+app.get('/api/rankings', asyncHandler(async (req, res) => {
+  const { 
+    sort = 'weighted_pp', 
+    limit = 50, 
+    offset = 0, 
+    timeframe = 'all',
+    minScores = 5 
+  } = req.query;
+  
+  const cacheKey = getCacheKey('rankings', sort, limit, offset, timeframe, minScores);
+  
+  const data = await getCached(cacheKey, async () => {
+    const allowedSort = ['weighted_pp', 'total_pp', 'first_places', 'avg_rank', 'accuracy_avg', 'total_scores'];
+    const sortColumn = allowedSort.includes(sort.toLowerCase()) ? sort.toLowerCase() : 'weighted_pp';
+    const sortOrder = sort === 'avg_rank' ? 'ASC' : 'DESC';
     
-    const cacheKey = `rankings:${sort}:${limit}:${offset}:${timeframe}:${minScores}`;
+    let whereClause = `WHERE total_scores >= $1`;
+    let params = [parseInt(minScores)];
+    let paramCount = 1;
     
-    const data = await getCached(cacheKey, async () => {
-      const allowedSort = ['weighted_pp', 'total_pp', 'first_places', 'avg_rank', 'accuracy_avg', 'total_scores'];
-     const sortColumn = allowedSort.includes(sort.toLowerCase()) ? sort.toLowerCase() : 'weighted_pp';
-      const sortOrder = sort === 'avg_rank' ? 'ASC' : 'DESC';
+    if (timeframe !== 'all') {
+      const timeRanges = {
+        '24h': 24 * 60 * 60 * 1000,
+        '7d': 7 * 24 * 60 * 60 * 1000,
+        '30d': 30 * 24 * 60 * 60 * 1000
+      };
       
-      let whereClause = `WHERE total_scores >= $1`;
-      let params = [parseInt(minScores)];
-      let paramCount = 1;
-      
-      // Add timeframe filtering if needed
-      if (timeframe !== 'all') {
-        const timeRanges = {
-          '24h': 24 * 60 * 60 * 1000,
-          '7d': 7 * 24 * 60 * 60 * 1000,
-          '30d': 30 * 24 * 60 * 60 * 1000
-        };
-        
-        const cutoff = Date.now() - (timeRanges[timeframe] || 0);
-        whereClause += ` AND last_calculated >= ${++paramCount}`;
-        params.push(cutoff);
-      }
-      
-      params.push(parseInt(limit), parseInt(offset));
-      
-      const rankings = await getRows(`
-        SELECT *,
-               ROW_NUMBER() OVER (ORDER BY ${sortColumn} ${sortOrder}) as rank
-        FROM player_stats 
-        ${whereClause}
-        ORDER BY ${sortColumn} ${sortOrder}
-        LIMIT ${++paramCount} OFFSET ${++paramCount}
-      `, params);
-      
-      // Add rank change calculation
-      for (const player of rankings) {
-        const previousRank = await getRow(`
-          SELECT ROW_NUMBER() OVER (ORDER BY ${sortColumn} ${sortOrder}) as old_rank
-          FROM player_stats 
-          WHERE username = $1
-        `, [player.username]);
-        
-        player.rankChange = previousRank ? player.rank - previousRank.old_rank : 0;
-      }
-      
-      return rankings;
-    }, 300);
-    
-    res.json({
-      success: true,
-      data,
-      meta: {
-        sort,
-        limit: parseInt(limit),
-        offset: parseInt(offset),
-        hasMore: data.length === parseInt(limit)
-      }
-    });
-  } catch (err) {
-    log('ERROR', '❌ Rankings API error:', err.message);
-    res.status(500).json({ success: false, error: 'Database error' });
-  }
-});
-
-// Skill leaderboards
-app.get('/api/skills/:skillType', async (req, res) => {
-  try {
-    const { skillType } = req.params;
-    const { limit = 20 } = req.query;
-    
-    const allowedSkills = ['aim', 'speed', 'accuracy', 'reading', 'consistency'];
-    if (!allowedSkills.includes(skillType)) {
-      return res.status(400).json({ success: false, error: 'Invalid skill type' });
+      const cutoff = Date.now() - (timeRanges[timeframe] || 0);
+      whereClause += ` AND last_calculated >= ${++paramCount}`;
+      params.push(cutoff);
     }
     
-    const cacheKey = `skills:${skillType}:${limit}`;
+    params.push(parseInt(limit), parseInt(offset));
     
-    const data = await getCached(cacheKey, async () => {
-      return await getRows(`
-        SELECT 
-          st.username,
-          AVG(st.skill_value) as avg_skill,
-          MAX(st.skill_value) as peak_skill,
-          COUNT(*) as data_points,
-          ps.total_scores,
-          ps.weighted_pp,
-          ROW_NUMBER() OVER (ORDER BY AVG(st.skill_value) DESC) as rank
-        FROM skill_tracking st
-        JOIN player_stats ps ON st.username = ps.username
-        WHERE st.skill_type = $1
-        AND st.calculated_at > $2
-        GROUP BY st.username, ps.total_scores, ps.weighted_pp
-        HAVING COUNT(*) >= 3
-        ORDER BY avg_skill DESC
-        LIMIT $3
-      `, [skillType, Date.now() - (30 * 24 * 60 * 60 * 1000), parseInt(limit)]);
-    }, 600); // 10 minute cache
-    
-    res.json({ success: true, data, skillType });
-  } catch (err) {
-    log('ERROR', '❌ Skill leaderboard error:', err.message);
-    res.status(500).json({ success: false, error: 'Database error' });
-  }
-});
-
-// Beatmap-specific leaderboards
-app.get('/api/beatmaps/:id/scores', async (req, res) => {
-  try {
-    const { id } = req.params;
-    const cacheKey = `beatmap:${id}:scores`;
-    
-    const data = await getCached(cacheKey, async () => {
-      const [scores, metadata] = await Promise.all([
-        getRows(`
-          SELECT * FROM algeria_top50
-          WHERE beatmap_id = $1
-          ORDER BY rank ASC
-        `, [id]),
-        getRow(`
-          SELECT * FROM beatmap_metadata
-          WHERE beatmap_id = $1
-        `, [id])
-      ]);
-      
-      return { scores, metadata };
-    }, 300);
-    
-    if (data.scores.length === 0) {
-      return res.status(404).json({ success: false, error: 'No Algerian scores found' });
+    return await getRows(`
+      SELECT *,
+             ROW_NUMBER() OVER (ORDER BY ${sortColumn} ${sortOrder}) as rank
+      FROM player_stats 
+      ${whereClause}
+      ORDER BY ${sortColumn} ${sortOrder}
+      LIMIT ${++paramCount} OFFSET ${++paramCount}
+    `, params);
+  }, 300);
+  
+  res.json({
+    success: true,
+    data,
+    meta: {
+      sort,
+      limit: parseInt(limit),
+      offset: parseInt(offset),
+      hasMore: data.length === parseInt(limit)
     }
-    
-    res.json({ success: true, ...data });
-  } catch (err) {
-    log('ERROR', '❌ Beatmap scores error:', err.message);
-    res.status(500).json({ success: false, error: 'Database error' });
-  }
-});
+  });
+}));
 
-// Recent activity feed
-app.get('/api/activity', async (req, res) => {
-  try {
-    const { limit = 50, type, username } = req.query;
-    const cacheKey = `activity:${limit}:${type}:${username}`;
-    
-    const data = await getCached(cacheKey, async () => {
-      let whereClause = '1=1';
-      let params = [];
-      let paramCount = 0;
-      
-      if (type) {
-        whereClause += ` AND activity_type = ${++paramCount}`;
-        params.push(type);
-      }
-      
-      if (username) {
-        whereClause += ` AND username ILIKE ${++paramCount}`;
-        params.push(`%${username}%`);
-      }
-      
-      params.push(parseInt(limit));
-      
-      return await getRows(`
-        SELECT pa.*, ps.avatar_url
-        FROM player_activity pa
-        LEFT JOIN player_stats ps ON pa.username = ps.username
-        WHERE ${whereClause}
-        ORDER BY timestamp DESC
-        LIMIT ${++paramCount}
-      `, params);
-    }, 120); // 2 minute cache
-    
-    res.json({ success: true, data });
-  } catch (err) {
-    log('ERROR', '❌ Activity feed error:', err.message);
-    res.status(500).json({ success: false, error: 'Database error' });
-  }
-});
-
-// Player comparison
-app.get('/api/compare/:username1/:username2', async (req, res) => {
-  try {
+// Player comparison endpoint
+app.get('/api/compare/:username1/:username2', 
+  validateInput({
+    username1: { required: true, minLength: 2 },
+    username2: { required: true, minLength: 2 }
+  }),
+  asyncHandler(async (req, res) => {
     const { username1, username2 } = req.params;
-    const cacheKey = `compare:${username1.toLowerCase()}:${username2.toLowerCase()}`;
+    const cacheKey = getCacheKey('compare', username1, username2);
     
     const data = await getCached(cacheKey, async () => {
       const [player1, player2] = await Promise.all([
@@ -1384,311 +1847,18 @@ app.get('/api/compare/:username1/:username2', async (req, res) => {
     }
     
     res.json({ success: true, data });
-  } catch (err) {
-    log('ERROR', '❌ Player comparison error:', err.message);
-    res.status(500).json({ success: false, error: 'Database error' });
-  }
-});
+  })
+);
 
-// Recommendations endpoint
-app.get('/api/recommendations/:username', async (req, res) => {
-  try {
-    const { username } = req.params;
-    const { limit = 10 } = req.query;
-    
-    const cacheKey = `recommendations:${username.toLowerCase()}:${limit}`;
-    
-    const data = await getCached(cacheKey, async () => {
-      return await RecommendationEngine.getRecommendedBeatmaps(username, parseInt(limit));
-    }, 1800); // 30 minute cache
-    
-    res.json({ success: true, data });
-  } catch (err) {
-    log('ERROR', '❌ Recommendations error:', err.message);
-    res.status(500).json({ success: false, error: 'Database error' });
-  }
-});
-
-// Analytics endpoints
-app.get('/api/analytics/overview', async (req, res) => {
-  try {
-    const cacheKey = 'analytics:overview';
-    
-    const data = await getCached(cacheKey, async () => {
-      const [
-        totalStats, recentActivity, topPerformers, 
-        skillDistribution, modUsage, difficultyDistribution
-      ] = await Promise.all([
-        getRow(`
-          SELECT 
-            COUNT(DISTINCT username) as total_players,
-            COUNT(*) as total_scores,
-            COUNT(DISTINCT beatmap_id) as total_beatmaps,
-            AVG(accuracy) as avg_accuracy,
-            MAX(score) as highest_score,
-            SUM(pp) as total_pp
-          FROM algeria_top50
-        `),
-        getRow(`
-          SELECT COUNT(*) as active_24h
-          FROM algeria_top50
-          WHERE last_updated > $1
-        `, [Date.now() - (24 * 60 * 60 * 1000)]),
-        getRows(`
-          SELECT username, weighted_pp, first_places
-          FROM player_stats
-          ORDER BY weighted_pp DESC
-          LIMIT 5
-        `),
-        getRows(`
-          SELECT skill_type, AVG(skill_value) as avg_value
-          FROM skill_tracking
-          WHERE calculated_at > $1
-          GROUP BY skill_type
-        `, [Date.now() - (30 * 24 * 60 * 60 * 1000)]),
-        getRows(`
-          SELECT 
-            mods, 
-            COUNT(*) as usage_count,
-            AVG(accuracy) as avg_accuracy,
-            AVG(pp) as avg_pp
-          FROM algeria_top50
-          WHERE mods != 'None'
-          GROUP BY mods
-          ORDER BY usage_count DESC
-          LIMIT 10
-        `),
-        getRows(`
-          SELECT 
-            FLOOR(difficulty_rating) as difficulty_range,
-            COUNT(*) as score_count,
-            AVG(accuracy) as avg_accuracy
-          FROM algeria_top50
-          GROUP BY FLOOR(difficulty_rating)
-          ORDER BY difficulty_range ASC
-        `)
-      ]);
-      
-      return {
-        totalStats: {
-          ...totalStats,
-          active24h: parseInt(recentActivity.active_24h)
-        },
-        topPerformers,
-        skillDistribution,
-        modUsage,
-        difficultyDistribution
-      };
-    }, 900); // 15 minute cache
-    
-    res.json({ success: true, data });
-  } catch (err) {
-    log('ERROR', '❌ Analytics overview error:', err.message);
-    res.status(500).json({ success: false, error: 'Database error' });
-  }
-});
-
-// Daily statistics endpoint
-app.get('/api/analytics/daily', async (req, res) => {
-  try {
-    const { days = 30 } = req.query;
-    const cacheKey = `analytics:daily:${days}`;
-    
-    const data = await getCached(cacheKey, async () => {
-      return await getRows(`
-        SELECT * FROM daily_stats
-        ORDER BY date DESC
-        LIMIT $1
-      `, [parseInt(days)]);
-    }, 3600); // 1 hour cache
-    
-    res.json({ success: true, data });
-  } catch (err) {
-    log('ERROR', '❌ Daily analytics error:', err.message);
-    res.status(500).json({ success: false, error: 'Database error' });
-  }
-});
-
-// Achievement system endpoints
-app.get('/api/achievements', async (req, res) => {
-  try {
-    const { category, limit = 50 } = req.query;
-    const cacheKey = `achievements:${category}:${limit}`;
-    
-    const data = await getCached(cacheKey, async () => {
-      let whereClause = '1=1';
-      let params = [];
-      let paramCount = 0;
-      
-      if (category) {
-        whereClause += ` AND category = ${++paramCount}`;
-        params.push(category);
-      }
-      
-      params.push(parseInt(limit));
-      
-      const achievements = await getRows(`
-        SELECT a.*, COUNT(pa.username) as unlock_count
-        FROM achievements a
-        LEFT JOIN player_achievements pa ON a.id = pa.achievement_id
-        WHERE ${whereClause}
-        GROUP BY a.id
-        ORDER BY a.points DESC
-        LIMIT ${++paramCount}
-      `, params);
-      
-      return achievements;
-    }, 1800); // 30 minute cache
-    
-    res.json({ success: true, data });
-  } catch (err) {
-    log('ERROR', '❌ Achievements error:', err.message);
-    res.status(500).json({ success: false, error: 'Database error' });
-  }
-});
-
-// Social features - Following system
-app.post('/api/social/follow', authenticateToken, async (req, res) => {
-  try {
-    const { targetUsername } = req.body;
-    const followerUsername = req.user.username;
-    
-    if (followerUsername === targetUsername) {
-      return res.status(400).json({ success: false, error: 'Cannot follow yourself' });
-    }
-    
-    // Check if target user exists
-    const targetExists = await getRow(`
-      SELECT username FROM player_stats WHERE username ILIKE $1
-    `, [`%${targetUsername}%`]);
-    
-    if (!targetExists) {
-      return res.status(404).json({ success: false, error: 'User not found' });
-    }
-    
-    await query(`
-      INSERT INTO player_relationships (follower_username, following_username, relationship_type)
-      VALUES ($1, $2, 'follow')
-      ON CONFLICT (follower_username, following_username) DO NOTHING
-    `, [followerUsername, targetExists.username]);
-    
-    // Add activity
-    await query(`
-      INSERT INTO player_activity (username, activity_type, activity_data)
-      VALUES ($1, 'followed_player', $2)
-    `, [followerUsername, JSON.stringify({ targetUsername: targetExists.username })]);
-    
-    res.json({ success: true, message: 'Successfully followed user' });
-  } catch (err) {
-    log('ERROR', '❌ Follow error:', err.message);
-    res.status(500).json({ success: false, error: 'Database error' });
-  }
-});
-
-app.delete('/api/social/follow/:username', authenticateToken, async (req, res) => {
-  try {
-    const { username } = req.params;
-    const followerUsername = req.user.username;
-    
-    const result = await query(`
-      DELETE FROM player_relationships 
-      WHERE follower_username = $1 AND following_username ILIKE $2
-    `, [followerUsername, `%${username}%`]);
-    
-    if (result.rowCount === 0) {
-      return res.status(404).json({ success: false, error: 'Not following this user' });
-    }
-    
-    res.json({ success: true, message: 'Successfully unfollowed user' });
-  } catch (err) {
-    log('ERROR', '❌ Unfollow error:', err.message);
-    res.status(500).json({ success: false, error: 'Database error' });
-  }
-});
-
-// Comments system
-app.post('/api/players/:username/comments', authenticateToken, async (req, res) => {
-  try {
-    const { username } = req.params;
-    const { comment } = req.body;
-    const commenterUsername = req.user.username;
-    
-    if (!comment || comment.trim().length === 0) {
-      return res.status(400).json({ success: false, error: 'Comment cannot be empty' });
-    }
-    
-    if (comment.length > 1000) {
-      return res.status(400).json({ success: false, error: 'Comment too long' });
-    }
-    
-    // Check if target user exists
-    const targetExists = await getRow(`
-      SELECT username FROM player_stats WHERE username ILIKE $1
-    `, [`%${username}%`]);
-    
-    if (!targetExists) {
-      return res.status(404).json({ success: false, error: 'User not found' });
-    }
-    
-    await query(`
-      INSERT INTO player_comments (target_username, commenter_username, comment_text)
-      VALUES ($1, $2, $3)
-    `, [targetExists.username, commenterUsername, comment.trim()]);
-    
-    // Add activity
-    await query(`
-      INSERT INTO player_activity (username, activity_type, activity_data)
-      VALUES ($1, 'left_comment', $2)
-    `, [commenterUsername, JSON.stringify({ 
-      targetUsername: targetExists.username, 
-      commentPreview: comment.trim().substring(0, 50) 
-    })]);
-    
-    res.json({ success: true, message: 'Comment added successfully' });
-  } catch (err) {
-    log('ERROR', '❌ Comment error:', err.message);
-    res.status(500).json({ success: false, error: 'Database error' });
-  }
-});
-
-app.get('/api/players/:username/comments', async (req, res) => {
-  try {
-    const { username } = req.params;
-    const { limit = 20, offset = 0 } = req.query;
-    
-    const cacheKey = `comments:${username.toLowerCase()}:${limit}:${offset}`;
-    
-    const data = await getCached(cacheKey, async () => {
-      return await getRows(`
-        SELECT 
-          pc.*,
-          ps.avatar_url as commenter_avatar
-        FROM player_comments pc
-        LEFT JOIN player_stats ps ON pc.commenter_username = ps.username
-        WHERE pc.target_username ILIKE $1 AND pc.is_deleted = false
-        ORDER BY pc.created_at DESC
-        LIMIT $2 OFFSET $3
-      `, [`%${username}%`, parseInt(limit), parseInt(offset)]);
-    }, 300); // 5 minute cache
-    
-    res.json({ success: true, data });
-  } catch (err) {
-    log('ERROR', '❌ Comments fetch error:', err.message);
-    res.status(500).json({ success: false, error: 'Database error' });
-  }
-});
-
-// Search endpoints
-app.get('/api/search', async (req, res) => {
-  try {
+// Search endpoint
+app.get('/api/search', 
+  validateInput({
+    q: { required: true, minLength: 2, maxLength: 50 }
+  }),
+  asyncHandler(async (req, res) => {
     const { q, type = 'all', limit = 20 } = req.query;
-    
-    if (!q || q.trim().length < 2) {
-      return res.status(400).json({ success: false, error: 'Search query too short' });
-    }
-    
     const searchTerm = q.trim();
-    const cacheKey = `search:${type}:${searchTerm}:${limit}`;
+    const cacheKey = getCacheKey('search', type, searchTerm, limit);
     
     const data = await getCached(cacheKey, async () => {
       const results = {};
@@ -1722,245 +1892,379 @@ app.get('/api/search', async (req, res) => {
       }
       
       return results;
-    }, 600); // 10 minute cache
+    }, 600);
     
     res.json({ success: true, query: searchTerm, data });
-  } catch (err) {
-    log('ERROR', '❌ Search error:', err.message);
-    res.status(500).json({ success: false, error: 'Database error' });
-  }
-});
+  })
+);
 
-// Seasonal tracking endpoints
-app.get('/api/seasons', async (req, res) => {
-  try {
-    const seasons = await getRows(`
-      SELECT * FROM seasons
-      ORDER BY start_date DESC
-    `);
-    
-    res.json({ success: true, data: seasons });
-  } catch (err) {
-    log('ERROR', '❌ Seasons error:', err.message);
-    res.status(500).json({ success: false, error: 'Database error' });
-  }
-});
-
-app.get('/api/seasons/:id/rankings', async (req, res) => {
-  try {
-    const { id } = req.params;
-    const { limit = 50 } = req.query;
-    
-    const cacheKey = `season:${id}:rankings:${limit}`;
-    
-    const data = await getCached(cacheKey, async () => {
-      return await getRows(`
+// Analytics endpoints
+app.get('/api/analytics/overview', asyncHandler(async (req, res) => {
+  const cacheKey = 'analytics:overview';
+  
+  const data = await getCached(cacheKey, async () => {
+    const [
+      totalStats, recentActivity, topPerformers, 
+      skillDistribution, modUsage, difficultyDistribution
+    ] = await Promise.all([
+      getRow(`
         SELECT 
-          ss.*,
-          ps.username,
-          ps.avatar_url,
-          ROW_NUMBER() OVER (ORDER BY ss.total_pp DESC) as position
-        FROM seasonal_stats ss
-        JOIN player_stats ps ON ss.username = ps.username
-        WHERE ss.season_id = $1
-        ORDER BY ss.total_pp DESC
-        LIMIT $2
-      `, [parseInt(id), parseInt(limit)]);
-    }, 900); // 15 minute cache
+          COUNT(DISTINCT username) as total_players,
+          COUNT(*) as total_scores,
+          COUNT(DISTINCT beatmap_id) as total_beatmaps,
+          AVG(accuracy) as avg_accuracy,
+          MAX(score) as highest_score,
+          SUM(pp) as total_pp
+        FROM algeria_top50
+      `),
+      getRow(`
+        SELECT COUNT(*) as active_24h
+        FROM algeria_top50
+        WHERE last_updated > $1
+      `, [Date.now() - (24 * 60 * 60 * 1000)]),
+      getRows(`
+        SELECT username, weighted_pp, first_places
+        FROM player_stats
+        ORDER BY weighted_pp DESC
+        LIMIT 5
+      `),
+      getRows(`
+        SELECT skill_type, AVG(skill_value) as avg_value
+        FROM skill_tracking
+        WHERE calculated_at > $1
+        GROUP BY skill_type
+      `, [Date.now() - (30 * 24 * 60 * 60 * 1000)]),
+      getRows(`
+        SELECT 
+          mods, 
+          COUNT(*) as usage_count,
+          AVG(accuracy) as avg_accuracy,
+          AVG(pp) as avg_pp
+        FROM algeria_top50
+        WHERE mods != 'None'
+        GROUP BY mods
+        ORDER BY usage_count DESC
+        LIMIT 10
+      `),
+      getRows(`
+        SELECT 
+          FLOOR(difficulty_rating) as difficulty_range,
+          COUNT(*) as score_count,
+          AVG(accuracy) as avg_accuracy
+        FROM algeria_top50
+        GROUP BY FLOOR(difficulty_rating)
+        ORDER BY difficulty_range ASC
+      `)
+    ]);
     
-    res.json({ success: true, data });
-  } catch (err) {
-    log('ERROR', '❌ Seasonal rankings error:', err.message);
-    res.status(500).json({ success: false, error: 'Database error' });
-  }
-});
+    return {
+      totalStats: {
+        ...totalStats,
+        active24h: parseInt(recentActivity.active_24h)
+      },
+      topPerformers,
+      skillDistribution,
+      modUsage,
+      difficultyDistribution
+    };
+  }, 900);
+  
+  res.json({ success: true, data });
+}));
 
-// Export endpoints
-app.get('/api/export/:type', async (req, res) => {
-  try {
-    const { type } = req.params;
-    const { format = 'json', limit = 1000 } = req.query;
-    
-    let data;
-    let filename;
-    
-    switch (type) {
-      case 'leaderboard':
-        data = await getRows(`
-          SELECT * FROM algeria_top50 
-          ORDER BY score DESC 
-          LIMIT $1
-        `, [parseInt(limit)]);
-        filename = 'algeria_leaderboard';
-        break;
-        
-      case 'players':
-        data = await getRows(`
-          SELECT * FROM player_stats 
-          ORDER BY weighted_pp DESC 
-          LIMIT $1
-        `, [parseInt(limit)]);
-        filename = 'algeria_players';
-        break;
-        
-      default:
-        return res.status(400).json({ success: false, error: 'Invalid export type' });
-    }
-    
-    if (format === 'csv') {
-      const headers = Object.keys(data[0] || {});
-      const csvContent = [
-        headers.join(','),
-        ...data.map(row => headers.map(header => `"${row[header] || ''}"`).join(','))
-      ].join('\n');
-      
-      res.setHeader('Content-Type', 'text/csv');
-      res.setHeader('Content-Disposition', `attachment; filename=${filename}.csv`);
-      res.send(csvContent);
-    } else {
-      res.json({ success: true, data, exported: data.length });
-    }
-  } catch (err) {
-    log('ERROR', '❌ Export error:', err.message);
-    res.status(500).json({ success: false, error: 'Export failed' });
+// Player Discovery API endpoints
+app.post('/api/admin/discover-players', authenticateToken, asyncHandler(async (req, res) => {
+  if (req.user.role !== 'admin') {
+    return res.status(403).json({ success: false, error: 'Admin access required' });
   }
-});
+
+  // Run discovery in background
+  playerDiscovery.runDiscovery().catch(err => {
+    log('ERROR', '❌ Manual player discovery failed:', err.message);
+  });
+
+  res.json({ success: true, message: 'Player discovery started' });
+}));
+
+app.post('/api/webhook/player-register', 
+  validateInput({
+    username: { minLength: 2, maxLength: 15 },
+    userId: { type: 'number' }
+  }),
+  asyncHandler(async (req, res) => {
+    const { username, userId, source = 'webhook' } = req.body;
+    
+    if (!username && !userId) {
+      return res.status(400).json({ success: false, error: 'Username or userId required' });
+    }
+
+    const token = await getAccessToken();
+    const response = await axios.get(`https://osu.ppy.sh/api/v2/users/${userId || username}/osu`, {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+
+    const userData = response.data;
+    
+    if (userData.country?.code !== 'DZ') {
+      return res.status(400).json({ 
+        success: false, 
+        error: 'Player is not from Algeria' 
+      });
+    }
+
+    const registered = await playerDiscovery.registerPlayer(userData, source);
+    
+    if (registered) {
+      res.json({ 
+        success: true, 
+        message: `Player ${userData.username} registered successfully`,
+        player: {
+          username: userData.username,
+          userId: userData.id,
+          countryRank: userData.statistics?.country_rank
+        }
+      });
+    } else {
+      res.status(500).json({ success: false, error: 'Registration failed' });
+    }
+  })
+);
+
+app.get('/api/discovery/stats', asyncHandler(async (req, res) => {
+  const stats = await getRow(`
+    SELECT 
+      COUNT(*) as total_players,
+      COUNT(CASE WHEN last_seen > $1 THEN 1 END) as active_players,
+      COUNT(CASE WHEN join_date > $2 THEN 1 END) as new_this_week
+    FROM player_stats
+    WHERE is_active = true
+  `, [
+    Date.now() - (7 * 24 * 60 * 60 * 1000), 
+    Date.now() - (7 * 24 * 60 * 60 * 1000)  
+  ]);
+
+  const discoveryMethods = await getRows(`
+    SELECT 
+      discovery_method as method,
+      COUNT(*) as count
+    FROM player_discovery_log
+    WHERE discovery_timestamp > $1
+    GROUP BY discovery_method
+    ORDER BY count DESC
+  `, [Date.now() - (30 * 24 * 60 * 60 * 1000)]);
+
+  res.json({
+    success: true,
+    data: {
+      ...stats,
+      discoveryMethods
+    }
+  });
+}));
 
 // Admin endpoints
-app.post('/api/admin/force-scan', authenticateToken, async (req, res) => {
-  try {
-    if (req.user.role !== 'admin') {
-      return res.status(403).json({ success: false, error: 'Admin access required' });
-    }
-    log('INFO', '🔧 Manual scan triggered via API');
-    updateLeaderboards().catch(err => {
-      log('ERROR', '❌ Manual scan failed:', err.message);
-    });
-    res.json({ success: true, message: 'Manual scan started' });
-  } catch (err) {
-    log('ERROR', '❌ Force scan error:', err.message);
-    res.status(500).json({ success: false, error: 'Failed to start scan' });
+app.post('/api/admin/force-scan', authenticateToken, asyncHandler(async (req, res) => {
+  if (req.user.role !== 'admin') {
+    return res.status(403).json({ success: false, error: 'Admin access required' });
   }
+  
+  log('INFO', '🔧 Manual scan triggered via API');
+  updateLeaderboards().catch(err => {
+    log('ERROR', '❌ Manual scan failed:', err.message);
+  });
+  
+  res.json({ success: true, message: 'Manual scan started' });
+}));
+
+// Error handling middleware
+app.use((err, req, res, next) => {
+  log('ERROR', 'Unhandled error:', err);
+  
+  if (err.name === 'ValidationError') {
+    return res.status(400).json({ success: false, error: 'Validation failed', details: err.message });
+  }
+  
+  if (err.code === 'ECONNREFUSED') {
+    return res.status(503).json({ success: false, error: 'Database connection failed' });
+  }
+  
+  res.status(500).json({ 
+    success: false, 
+    error: process.env.NODE_ENV === 'production' ? 'Internal server error' : err.message 
+  });
 });
 
-app.post('/api/admin/recalculate-stats', authenticateToken, async (req, res) => {
-  try {
-    if (req.user.role !== 'admin') {
-      return res.status(403).json({ success: false, error: 'Admin access required' });
-    }
-    const players = await getRows(`SELECT DISTINCT username FROM algeria_top50`);
-    let processed = 0;
-    for (const player of players) {
-      await updatePlayerStats(player.username);
-      await checkAchievements(player.username);
-      processed++;
-      if (processed % 10 === 0) {
-        log('INFO', `📊 Recalculated stats for ${processed}/${players.length} players`);
-      }
-    }
-    await invalidateCache('*');
-    res.json({ success: true, message: `Recalculated stats for ${processed} players` });
-  } catch (err) {
-    log('ERROR', '❌ Stats recalculation error:', err.message);
-    res.status(500).json({ success: false, error: 'Recalculation failed' });
-  }
+// 404 handler
+app.use('*', (req, res) => {
+  res.status(404).json({ success: false, error: 'Endpoint not found' });
 });
 
-// Enhanced update function with comprehensive features
-async function updateLeaderboards() {
-  log('INFO', "🔄 Starting comprehensive leaderboards update...");
-  try {
-    const beatmaps = await getAllBeatmaps();
-    await saveProgress("total_beatmaps", beatmaps.length);
-    const priorityBeatmaps = await getRows(`
-      SELECT beatmap_id, MIN(beatmap_title) AS beatmap_title
-      FROM algeria_top50
-      GROUP BY beatmap_id
-      ORDER BY MIN(last_updated) ASC
-      LIMIT 200
-    `);
-    if (priorityBeatmaps.length > 0) {
-      log('INFO', `⚡ Priority scanning ${priorityBeatmaps.length} known beatmaps`);
-      for (const bm of priorityBeatmaps) {
-        await limiter.schedule(() => fetchLeaderboard(bm.beatmap_id, bm.beatmap_title));
+// ==================== WEBSOCKET SERVER ====================
+const server = createServer(app);
+const wss = new WebSocket.Server({ server, path: '/ws' });
+
+wss.on('connection', (ws, req) => {
+  log('INFO', '🔌 New WebSocket connection from', req.connection.remoteAddress);
+  ws.send(JSON.stringify({ type: 'connected', timestamp: Date.now() }));
+  
+  ws.on('close', () => {
+    log('DEBUG', '🔌 WebSocket connection closed');
+  });
+  
+  ws.on('error', (error) => {
+    log('ERROR', '🔌 WebSocket error:', error.message);
+  });
+});
+
+// Broadcast helper
+function broadcastToClients(data) {
+  const message = JSON.stringify(data);
+  let sentCount = 0;
+  
+  wss.clients.forEach(client => {
+    if (client.readyState === WebSocket.OPEN) {
+      try {
+        client.send(message);
+        sentCount++;
+      } catch (err) {
+        log('ERROR', 'Failed to send WebSocket message:', err.message);
       }
     }
-    let startIndex = parseInt(await getProgress("last_index") || "0", 10);
-    if (startIndex >= beatmaps.length) {
-      startIndex = 0;
-      await saveProgress("last_index", "0");
-    }
-    log('INFO', `📌 Regular scanning from index ${startIndex}/${beatmaps.length}`);
-    const batchSize = 100;
-    for (let i = startIndex; i < Math.min(startIndex + batchSize, beatmaps.length); i++) {
-      const bm = beatmaps[i];
-      await limiter.schedule(() => fetchLeaderboard(bm.id, bm.title));
-      await saveProgress("last_index", i + 1);
-      if (i % 10 === 0) {
-        broadcastToClients({
-          type: 'scan_progress',
-          progress: {
-            current: i,
-            total: beatmaps.length,
-            percentage: ((i / beatmaps.length) * 100).toFixed(2)
-          }
-        });
-      }
-    }
-    await calculateDailyStats();
-    await invalidateCache('leaderboard:*');
-    await invalidateCache('rankings:*');
-    await invalidateCache('analytics:*');
-    log('INFO', "✅ Comprehensive leaderboard update completed");
-    broadcastToClients({
-      type: 'scan_complete',
-      timestamp: Date.now()
-    });
-  } catch (err) {
-    log('ERROR', '❌ Leaderboard update failed:', err.message);
-    broadcastToClients({
-      type: 'scan_error',
-      error: err.message,
-      timestamp: Date.now()
-    });
+  });
+  
+  if (sentCount > 0) {
+    log('DEBUG', `📡 Broadcasted to ${sentCount} clients: ${data.type}`);
   }
 }
 
-async function getAllBeatmaps() {
-  let allBeatmaps = [];
-  let page = 1;
-  const maxPages = 50;
-  while (page <= maxPages) {
+// Make broadcast function globally available
+global.broadcastToClients = broadcastToClients;
+
+// ==================== SCHEDULED TASKS ====================
+function schedulePlayerDiscovery() {
+  // Quick discovery every 30 minutes (country rankings only)
+  setInterval(async () => {
     try {
-      const token = await getAccessToken();
-      const res = await axios.get('https://osu.ppy.sh/api/v2/beatmapsets/search', {
-        headers: { Authorization: `Bearer ${token}` },
-        params: { mode: 'osu', nsfw: false, sort: 'ranked_desc', page, 's': 'ranked' }
-      });
-      const sets = res.data.beatmapsets || [];
-      if (sets.length === 0) break;
-      const beatmaps = sets.flatMap(set =>
-        (set.beatmaps || [])
-          .filter(bm => bm.difficulty_rating >= 2.0)
-          .map(bm => ({ id: bm.id, title: `${set.artist} - ${set.title} [${bm.version}]`, difficulty: bm.difficulty_rating }))
-      );
-      allBeatmaps.push(...beatmaps);
-      page++;
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      await playerDiscovery.discoverFromCountryRankings();
     } catch (err) {
-      log('ERROR', `❌ Failed to fetch beatmap page ${page}:`, err.message);
-      break;
+      log('ERROR', 'Scheduled country rankings discovery failed:', err.message);
     }
-  }
-  return allBeatmaps;
+  }, 30 * 60 * 1000);
+
+  // Comprehensive discovery every 4 hours
+  setInterval(async () => {
+    try {
+      await playerDiscovery.runDiscovery();
+    } catch (err) {
+      log('ERROR', 'Scheduled comprehensive discovery failed:', err.message);
+    }
+  }, 4 * 60 * 60 * 1000);
+
+  // Leaderboard update every 2 hours
+  setInterval(async () => {
+    try {
+      await updateLeaderboards();
+    } catch (err) {
+      log('ERROR', 'Scheduled leaderboard update failed:', err.message);
+    }
+  }, 2 * 60 * 60 * 1000);
+
+  // Daily statistics calculation
+  setInterval(async () => {
+    try {
+      await calculateDailyStats();
+    } catch (err) {
+      log('ERROR', 'Daily stats calculation failed:', err.message);
+    }
+  }, 24 * 60 * 60 * 1000);
+
+  // Cleanup old skill tracking data (weekly)
+  setInterval(async () => {
+    try {
+      const cutoff = Date.now() - (90 * 24 * 60 * 60 * 1000); // 90 days
+      const result = await query(`
+        DELETE FROM skill_tracking 
+        WHERE calculated_at < $1
+      `, [cutoff]);
+      
+      if (result.rowCount > 0) {
+        log('INFO', `🧹 Cleaned up ${result.rowCount} old skill tracking entries`);
+      }
+    } catch (err) {
+      log('ERROR', 'Skill tracking cleanup failed:', err.message);
+    }
+  }, 7 * 24 * 60 * 60 * 1000);
+
+  log('INFO', '📅 Scheduled tasks initialized');
 }
 
-// Enhanced error handling and graceful shutdown
+// ==================== INITIALIZATION ====================
+async function initializeServer() {
+  try {
+    // Ensure database schema
+    await ensureTables();
+    
+    // Schedule background tasks
+    schedulePlayerDiscovery();
+    
+    // Run initial player discovery after startup delay
+    setTimeout(async () => {
+      log('INFO', '🚀 Running initial player discovery...');
+      try {
+        await playerDiscovery.runDiscovery();
+      } catch (err) {
+        log('ERROR', '❌ Initial player discovery failed:', err.message);
+      }
+    }, 30000); // 30 second delay
+    
+    // Run initial leaderboard update after longer delay
+    setTimeout(async () => {
+      log('INFO', '🚀 Running initial leaderboard update...');
+      try {
+        await updateLeaderboards();
+      } catch (err) {
+        log('ERROR', '❌ Initial leaderboard update failed:', err.message);
+      }
+    }, 60000); // 1 minute delay
+    
+    log('INFO', '✅ Server initialization completed');
+  } catch (err) {
+    log('ERROR', '❌ Server initialization failed:', err.message);
+    throw err;
+  }
+}
+
+// ==================== GRACEFUL SHUTDOWN ====================
 process.on('SIGINT', async () => {
   log('INFO', '🛑 Shutting down gracefully...');
-  if (global.wss) global.wss.close();
-  await pool.end();
-  redisClient.quit();
+  
+  // Close WebSocket server
+  wss.close(() => {
+    log('INFO', '🔌 WebSocket server closed');
+  });
+  
+  // Close HTTP server
+  server.close(() => {
+    log('INFO', '🌐 HTTP server closed');
+  });
+  
+  // Close database connections
+  try {
+    await pool.end();
+    log('INFO', '🗄️ Database pool closed');
+  } catch (err) {
+    log('ERROR', 'Database pool close error:', err.message);
+  }
+  
+  // Close Redis connection
+  try {
+    await redisClient.quit();
+    log('INFO', '🔴 Redis connection closed');
+  } catch (err) {
+    log('ERROR', 'Redis close error:', err.message);
+  }
+  
+  log('INFO', '✅ Graceful shutdown completed');
   process.exit(0);
 });
 
@@ -1971,44 +2275,107 @@ process.on('uncaughtException', (err) => {
 
 process.on('unhandledRejection', (reason, promise) => {
   log('ERROR', '💥 Unhandled rejection at:', promise, 'reason:', reason);
+  process.exit(1);
 });
 
-// Rate limiter for API
-const limiter = new Bottleneck({ maxConcurrent: 3, minTime: 600 });
+// ==================== START SERVER ====================
+server.listen(port, async () => {
+  log('INFO', `✅ Algeria osu! server running on port ${port}`);
+  log('INFO', `🔌 WebSocket server: ws://localhost:${port}/ws`);
+  log('INFO', `🌐 API endpoints: http://localhost:${port}/api/`);
+  log('INFO', `📊 Health check: http://localhost:${port}/health`);
+  
+  // Initialize server components
+  await initializeServer();
+});
 
-const { createServer } = require('http');
-const WebSocket = require('ws');
+// Export for testing
+module.exports = { app, server, playerDiscovery };
 
-// Create HTTP server from Express app (only once)
-if (!global.httpServer) {
-  global.httpServer = createServer(app);
-}
-const server = global.httpServer;
+// ---------- BACKGROUND SCHEDULER ----------
+const DISCOVERY_INTERVAL_MS = parseInt(process.env.DISCOVERY_INTERVAL_MS || `${4 * 60 * 60 * 1000}`);
+const RANKINGS_INTERVAL_MS = parseInt(process.env.RANKINGS_INTERVAL_MS || `${30 * 60 * 1000}`);
+const LEADERBOARD_INTERVAL_MS = parseInt(process.env.LEADERBOARD_INTERVAL_MS || `${2 * 60 * 60 * 1000}`);
+const DAILY_JOB_HOUR_UTC = parseInt(process.env.DAILY_JOB_HOUR_UTC || '0');
 
-// Create WebSocket server (only once)
-if (!global.wss) {
-  global.wss = new WebSocket.Server({ server, path: '/ws' });
+const RUN_BACKGROUND_JOBS = (process.env.RUN_BG_JOBS || 'true') === 'true';
 
-  global.wss.on('connection', (ws) => {
-    log('INFO', '🔌 New WebSocket connection');
-    ws.send(JSON.stringify({ type: 'connected' }));
-  });
-}
-
-// Broadcast helper
-global.broadcastToClients = (data) => {
-  global.wss.clients.forEach(client => {
-    if (client.readyState === WebSocket.OPEN) {
-      client.send(JSON.stringify(data));
+if (RUN_BACKGROUND_JOBS) {
+  setInterval(async () => {
+    try {
+      log('INFO', 'Scheduled: country rankings check');
+      await playerDiscovery.discoverFromCountryRankings();
+    } catch (e) {
+      log('ERROR', 'Scheduled country rankings check failed:', e.message);
     }
-  });
-};
+  }, RANKINGS_INTERVAL_MS);
 
-// Start server (only if not already listening)
-if (!server.listening) {
-  server.listen(port, () => {
-    log('INFO', `✅ Enhanced Algeria osu! server running on port ${port}`);
-    log('INFO', `🔌 WebSocket server attached to same port (${port}/ws)`);
-    log('INFO', `📊 Admin dashboard: http://localhost:${port}/admin`);
-  });
+  setInterval(async () => {
+    try {
+      log('INFO', 'Scheduled: full discovery run');
+      await playerDiscovery.runDiscovery();
+    } catch (e) {
+      log('ERROR', 'Scheduled discovery failed:', e.message);
+    }
+  }, DISCOVERY_INTERVAL_MS);
+
+  setInterval(async () => {
+    try {
+      log('INFO', 'Scheduled: leaderboard update');
+      await updateLeaderboards();
+    } catch (e) {
+      log('ERROR', 'Scheduled leaderboard update failed:', e.message);
+    }
+  }, LEADERBOARD_INTERVAL_MS);
+
+  (async function scheduleDaily() {
+    try {
+      const now = new Date();
+      const next = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), DAILY_JOB_HOUR_UTC, 0, 0));
+      if (next <= now) next.setUTCDate(next.getUTCDate() + 1);
+      const delay = next - now;
+      setTimeout(async function dailyRunner() {
+        try {
+          await calculateDailyStats();
+        } catch (e) {
+          log('ERROR', 'Daily stats job failed:', e.message);
+        } finally {
+          setTimeout(dailyRunner, 24 * 60 * 60 * 1000);
+        }
+      }, delay);
+    } catch (err) {
+      log('ERROR', 'Daily scheduler failed:', err.message);
+    }
+  })();
 }
+// ---------- END BACKGROUND SCHEDULER ----------
+
+// Graceful shutdown
+async function shutdown(code = 0) {
+  try {
+    log('INFO', 'Shutting down...');
+    if (wss) {
+      try { wss.clients.forEach(c => c.terminate()); } catch(e) {}
+      try { wss.close(); } catch(e) {}
+    }
+    if (server) {
+      try { server.close(); } catch(e) {}
+    }
+    try { await redisClient.quit(); } catch (e) {}
+    try { await pool.end(); } catch (e) {}
+    log('INFO', 'Shutdown complete');
+    process.exit(code);
+  } catch (err) {
+    log('ERROR', 'Shutdown error:', err.message);
+    process.exit(1);
+  }
+}
+
+process.on('SIGTERM', () => shutdown(0));
+
+// Server Start
+// =======================
+const PORT = process.env.PORT || 3000;
+server.listen(PORT, () => {
+  log('INFO', `HTTP + WS server listening on port ${PORT}`);
+});
