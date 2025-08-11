@@ -30,6 +30,8 @@ requiredEnvVars.forEach(envVar => {
 const app = express();
 const port = process.env.PORT || 3000;
 
+app.set('trust proxy', 1);
+
 // Enhanced security middleware
 app.use(helmet({
   contentSecurityPolicy: {
@@ -1638,15 +1640,15 @@ app.get('/api/leaderboards', asyncHandler(async (req, res) => {
     const sortColumn = allowedSort.includes(sort) ? sort : 'score';
     const sortOrder = ['ASC', 'DESC'].includes(order.toUpperCase()) ? order.toUpperCase() : 'DESC';
     
-    return await getRows(
-      `SELECT *, 
-              RANK() OVER (ORDER BY ${sortColumn} ${sortOrder}) as global_rank
-       FROM algeria_top50 
-       ${whereClause}
-       ORDER BY ${sortColumn} ${sortOrder} 
-       LIMIT ${++paramCount} OFFSET ${++paramCount}`,
-      params
-    );
+return await getRows(
+  `SELECT *, 
+          RANK() OVER (ORDER BY ${sortColumn} ${sortOrder}) as global_rank
+   FROM algeria_top50 
+   ${whereClause}
+   ORDER BY ${sortColumn} ${sortOrder} 
+   LIMIT $${++paramCount} OFFSET $${++paramCount}`,
+  [...params, parseInt(limit), parseInt(offset)]
+);
   }, 180);
   
   res.json({
@@ -1788,7 +1790,7 @@ app.get('/api/rankings', asyncHandler(async (req, res) => {
       FROM player_stats 
       ${whereClause}
       ORDER BY ${sortColumn} ${sortOrder}
-      LIMIT ${++paramCount} OFFSET ${++paramCount}
+      LIMIT $${++paramCount} OFFSET $${++paramCount}
     `, params);
   }, 300);
   
