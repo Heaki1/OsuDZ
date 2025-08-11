@@ -819,27 +819,30 @@ class PlayerDiscoveryService {
 async sendNewPlayerNotification(userData, discoveryMethod) {
     return; // skip sending anything
 }
-    
-    try {
-      const embed = {
-        title: "New Algerian Player Discovered! 🇩🇿✨",
-        description: `Welcome **${userData.username}** to the Algeria osu! community!`,
-        fields: [
-          { name: "Player", value: `[${userData.username}](https://osu.ppy.sh/users/${userData.id})`, inline: true },
-          { name: "Discovery", value: discoveryMethod.replace('_', ' '), inline: true },
-          { name: "Rank", value: `#${userData.statistics?.country_rank || 'N/A'} DZ`, inline: true }
-        ],
-        color: 0x00ff88,
-        timestamp: new Date().toISOString(),
-        thumbnail: { url: userData.avatar_url },
-        footer: { text: "Algeria osu! Leaderboards" }
-      };
 
-      await axios.post(process.env.DISCORD_WEBHOOK_URL, { embeds: [embed] });
-    } catch (err) {
-      log('ERROR', 'Discord notification failed:', err.message);
-    }
-  }
+// The code below is disabled for now
+/*
+try {
+  const embed = {
+    title: "New Algerian Player Discovered! 🇩🇿✨",
+    description: `Welcome **${userData.username}** to the Algeria osu! community!`,
+    fields: [
+      { name: "Player", value: `[${userData.username}](https://osu.ppy.sh/users/${userData.id})`, inline: true },
+      { name: "Discovery", value: discoveryMethod.replace('_', ' '), inline: true },
+      { name: "Rank", value: `#${userData.statistics?.country_rank || 'N/A'} DZ`, inline: true }
+    ],
+    color: 0x00ff88,
+    timestamp: new Date().toISOString(),
+    thumbnail: { url: userData.avatar_url },
+    footer: { text: "Algeria osu! Leaderboards" }
+  };
+
+  await axios.post(process.env.DISCORD_WEBHOOK_URL, { embeds: [embed] });
+} catch (err) {
+  log('ERROR', 'Discord notification failed:', err.message);
+}
+*/
+
 
   // Run complete discovery
   async runDiscovery() {
