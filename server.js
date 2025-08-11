@@ -2185,7 +2185,7 @@ wss.on('connection', (ws, req) => {
 function broadcastToClients(data) {
   const message = JSON.stringify(data);
   let sentCount = 0;
-  
+
   wss.clients.forEach(client => {
     if (client.readyState === WebSocket.OPEN) {
       try {
@@ -2196,214 +2196,75 @@ function broadcastToClients(data) {
       }
     }
   });
-  
+
   if (sentCount > 0) {
     log('DEBUG', `📡 Broadcasted to ${sentCount} clients: ${data.type}`);
   }
 }
 
-// Make broadcast function globally available
 global.broadcastToClients = broadcastToClients;
 
 // ==================== SCHEDULED TASKS ====================
-function schedulePlayerDiscovery() {
-  // Quick discovery every 30 minutes (country rankings only)
+// Helper to prevent overlapping jobs
+function scheduleInterval(fn, intervalMs, label) {
+  let running = false;
+
   setInterval(async () => {
-    try {
-      await playerDiscovery.discoverFromCountryRankings();
-    } catch (err) {
-      log('ERROR', 'Scheduled country rankings discovery failed:', err.message);
+    if (running) {
+      log('WARN', `Skipped scheduled task '${label}' because previous run is still running`);
+      return;
     }
-  }, 30 * 60 * 1000);
+    running = true;
+    try {
+      await fn();
+      log('INFO', `Scheduled task '${label}' completed successfully`);
+    } catch (err) {
+      log('ERROR', `Scheduled task '${label}' failed:`, err.message);
+    } finally {
+      running = false;
+    }
+  }, intervalMs);
+}
+
+function schedulePlayerDiscovery() {
+  // Use environment variables with sensible defaults
+  const DISCOVERY_INTERVAL_MS = parseInt(process.env.DISCOVERY_INTERVAL_MS) || 4 * 60 * 60 * 1000;
+  const RANKINGS_INTERVAL_MS = parseInt(process.env.RANKINGS_INTERVAL_MS) || 30 * 60 * 1000;
+  const LEADERBOARD_INTERVAL_MS = parseInt(process.env.LEADERBOARD_INTERVAL_MS) || 2 * 60 * 60 * 1000;
+  const SKILL_CLEANUP_INTERVAL_MS = 7 * 24 * 60 * 60 * 1000; // Weekly
+  const SKILL_CLEANUP_CUTOFF_DAYS = 90;
+
+  // Quick discovery every 30 minutes (country rankings only)
+  scheduleInterval(async () => {
+    await playerDiscovery.discoverFromCountryRankings();
+  }, RANKINGS_INTERVAL_MS, 'country rankings discovery');
 
   // Comprehensive discovery every 4 hours
-  setInterval(async () => {
-    try {
-      await playerDiscovery.runDiscovery();
-    } catch (err) {
-      log('ERROR', 'Scheduled comprehensive discovery failed:', err.message);
-    }
-  }, 4 * 60 * 60 * 1000);
+  scheduleInterval(async () => {
+    await playerDiscovery.runDiscovery();
+  }, DISCOVERY_INTERVAL_MS, 'comprehensive discovery');
 
   // Leaderboard update every 2 hours
-  setInterval(async () => {
-    try {
-      await updateLeaderboards();
-    } catch (err) {
-      log('ERROR', 'Scheduled leaderboard update failed:', err.message);
-    }
-  }, 2 * 60 * 60 * 1000);
+  scheduleInterval(async () => {
+    await updateLeaderboards();
+  }, LEADERBOARD_INTERVAL_MS, 'leaderboard update');
 
-  // Daily statistics calculation
-  setInterval(async () => {
-    try {
-      await calculateDailyStats();
-    } catch (err) {
-      log('ERROR', 'Daily stats calculation failed:', err.message);
-    }
-  }, 24 * 60 * 60 * 1000);
+  // Daily statistics calculation at fixed hour UTC
+  const DAILY_JOB_HOUR_UTC = parseInt(process.env.DAILY_JOB_HOUR_UTC) || 0;
 
-  // Cleanup old skill tracking data (weekly)
-  setInterval(async () => {
-    try {
-      const cutoff = Date.now() - (90 * 24 * 60 * 60 * 1000); // 90 days
-      const result = await query(`
-        DELETE FROM skill_tracking 
-        WHERE calculated_at < $1
-      `, [cutoff]);
-      
-      if (result.rowCount > 0) {
-        log('INFO', `🧹 Cleaned up ${result.rowCount} old skill tracking entries`);
-      }
-    } catch (err) {
-      log('ERROR', 'Skill tracking cleanup failed:', err.message);
-    }
-  }, 7 * 24 * 60 * 60 * 1000);
-
-  log('INFO', '📅 Scheduled tasks initialized');
-}
-
-// ==================== INITIALIZATION ====================
-async function initializeServer() {
-  try {
-    // Ensure database schema
-    await ensureTables();
-    
-    // Schedule background tasks
-    schedulePlayerDiscovery();
-    
-    // Run initial player discovery after startup delay
-    setTimeout(async () => {
-      log('INFO', '🚀 Running initial player discovery...');
-      try {
-        await playerDiscovery.runDiscovery();
-      } catch (err) {
-        log('ERROR', '❌ Initial player discovery failed:', err.message);
-      }
-    }, 30000); // 30 second delay
-    
-    // Run initial leaderboard update after longer delay
-    setTimeout(async () => {
-      log('INFO', '🚀 Running initial leaderboard update...');
-      try {
-        await updateLeaderboards();
-      } catch (err) {
-        log('ERROR', '❌ Initial leaderboard update failed:', err.message);
-      }
-    }, 60000); // 1 minute delay
-    
-    log('INFO', '✅ Server initialization completed');
-  } catch (err) {
-    log('ERROR', '❌ Server initialization failed:', err.message);
-    throw err;
-  }
-}
-
-// ==================== GRACEFUL SHUTDOWN ====================
-process.on('SIGINT', async () => {
-  log('INFO', '🛑 Shutting down gracefully...');
-  
-  // Close WebSocket server
-  wss.close(() => {
-    log('INFO', '🔌 WebSocket server closed');
-  });
-  
-  // Close HTTP server
-  server.close(() => {
-    log('INFO', '🌐 HTTP server closed');
-  });
-  
-  // Close database connections
-  try {
-    await pool.end();
-    log('INFO', '🗄️ Database pool closed');
-  } catch (err) {
-    log('ERROR', 'Database pool close error:', err.message);
-  }
-  
-  // Close Redis connection
-  try {
-    await redisClient.quit();
-    log('INFO', '🔴 Redis connection closed');
-  } catch (err) {
-    log('ERROR', 'Redis close error:', err.message);
-  }
-  
-  log('INFO', '✅ Graceful shutdown completed');
-  process.exit(0);
-});
-
-process.on('uncaughtException', (err) => {
-  log('ERROR', '💥 Uncaught exception:', err);
-  process.exit(1);
-});
-
-process.on('unhandledRejection', (reason, promise) => {
-  log('ERROR', '💥 Unhandled rejection at:', promise, 'reason:', reason);
-  process.exit(1);
-});
-
-// ==================== START SERVER ====================
-server.listen(port, async () => {
-  log('INFO', `✅ Algeria osu! server running on port ${port}`);
-  log('INFO', `🔌 WebSocket server: ws://localhost:${port}/ws`);
-  log('INFO', `🌐 API endpoints: http://localhost:${port}/api/`);
-  log('INFO', `📊 Health check: http://localhost:${port}/health`);
-  
-  // Initialize server components
-  await initializeServer();
-});
-
-// Export for testing
-module.exports = { app, server, playerDiscovery };
-
-// ---------- BACKGROUND SCHEDULER ----------
-const DISCOVERY_INTERVAL_MS = parseInt(process.env.DISCOVERY_INTERVAL_MS || `${4 * 60 * 60 * 1000}`);
-const RANKINGS_INTERVAL_MS = parseInt(process.env.RANKINGS_INTERVAL_MS || `${30 * 60 * 1000}`);
-const LEADERBOARD_INTERVAL_MS = parseInt(process.env.LEADERBOARD_INTERVAL_MS || `${2 * 60 * 60 * 1000}`);
-const DAILY_JOB_HOUR_UTC = parseInt(process.env.DAILY_JOB_HOUR_UTC || '0');
-
-const RUN_BACKGROUND_JOBS = (process.env.RUN_BG_JOBS || 'true') === 'true';
-
-if (RUN_BACKGROUND_JOBS) {
-  setInterval(async () => {
-    try {
-      log('INFO', 'Scheduled: country rankings check');
-      await playerDiscovery.discoverFromCountryRankings();
-    } catch (e) {
-      log('ERROR', 'Scheduled country rankings check failed:', e.message);
-    }
-  }, RANKINGS_INTERVAL_MS);
-
-  setInterval(async () => {
-    try {
-      log('INFO', 'Scheduled: full discovery run');
-      await playerDiscovery.runDiscovery();
-    } catch (e) {
-      log('ERROR', 'Scheduled discovery failed:', e.message);
-    }
-  }, DISCOVERY_INTERVAL_MS);
-
-  setInterval(async () => {
-    try {
-      log('INFO', 'Scheduled: leaderboard update');
-      await updateLeaderboards();
-    } catch (e) {
-      log('ERROR', 'Scheduled leaderboard update failed:', e.message);
-    }
-  }, LEADERBOARD_INTERVAL_MS);
-
-  (async function scheduleDaily() {
+  (function scheduleDaily() {
     try {
       const now = new Date();
       const next = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), DAILY_JOB_HOUR_UTC, 0, 0));
       if (next <= now) next.setUTCDate(next.getUTCDate() + 1);
       const delay = next - now;
+
       setTimeout(async function dailyRunner() {
         try {
           await calculateDailyStats();
+          log('INFO', 'Daily statistics calculation completed');
         } catch (e) {
-          log('ERROR', 'Daily stats job failed:', e.message);
+          log('ERROR', 'Daily stats calculation failed:', e.message);
         } finally {
           setTimeout(dailyRunner, 24 * 60 * 60 * 1000);
         }
@@ -2412,36 +2273,88 @@ if (RUN_BACKGROUND_JOBS) {
       log('ERROR', 'Daily scheduler failed:', err.message);
     }
   })();
+
+  // Cleanup old skill tracking data weekly
+  scheduleInterval(async () => {
+    const cutoff = Date.now() - SKILL_CLEANUP_CUTOFF_DAYS * 24 * 60 * 60 * 1000;
+    const result = await query(`
+      DELETE FROM skill_tracking 
+      WHERE calculated_at < $1
+    `, [cutoff]);
+    if (result.rowCount > 0) {
+      log('INFO', `🧹 Cleaned up ${result.rowCount} old skill tracking entries`);
+    }
+  }, SKILL_CLEANUP_INTERVAL_MS, 'skill tracking cleanup');
+
+  log('INFO', '📅 Scheduled tasks initialized');
 }
 
-app._router.stack.forEach((middleware) => {
-  if (middleware.route) {
-    // Routes registered directly on the app
-    console.log('Route:', middleware.route.path)
-  } else if (middleware.name === 'router') {
-    // Router middleware 
-    middleware.handle.stack.forEach((handler) => {
-      if(handler.route) {
-        console.log('Route:', handler.route.path)
-      }
-    })
-  }
-})
-
-// Graceful shutdown
-async function shutdown(code = 0) {
+// ==================== INITIALIZATION ====================
+async function initializeServer() {
   try {
-    log('INFO', 'Shutting down...');
+    await ensureTables();
+    schedulePlayerDiscovery();
+
+    // Initial discovery and leaderboard update with delays
+    setTimeout(async () => {
+      log('INFO', '🚀 Running initial player discovery...');
+      try {
+        await playerDiscovery.runDiscovery();
+      } catch (err) {
+        log('ERROR', '❌ Initial player discovery failed:', err.message);
+      }
+    }, 30000);
+
+    setTimeout(async () => {
+      log('INFO', '🚀 Running initial leaderboard update...');
+      try {
+        await updateLeaderboards();
+      } catch (err) {
+        log('ERROR', '❌ Initial leaderboard update failed:', err.message);
+      }
+    }, 60000);
+
+    log('INFO', '✅ Server initialization completed');
+  } catch (err) {
+    log('ERROR', '❌ Server initialization failed:', err.message);
+    throw err;
+  }
+}
+
+// ==================== GRACEFUL SHUTDOWN ====================
+async function shutdown(code = 0) {
+  log('INFO', '🛑 Shutting down gracefully...');
+
+  try {
     if (wss) {
-      try { wss.clients.forEach(c => c.terminate()); } catch(e) {}
-      try { wss.close(); } catch(e) {}
+      // Terminate clients first
+      wss.clients.forEach(c => {
+        try { c.terminate(); } catch (e) {}
+      });
+      await new Promise(resolve => wss.close(resolve));
+      log('INFO', '🔌 WebSocket server closed');
     }
+
     if (server) {
-      try { server.close(); } catch(e) {}
+      await new Promise(resolve => server.close(resolve));
+      log('INFO', '🌐 HTTP server closed');
     }
-    try { await redisClient.quit(); } catch (e) {}
-    try { await pool.end(); } catch (e) {}
-    log('INFO', 'Shutdown complete');
+
+    try {
+      await pool.end();
+      log('INFO', '🗄️ Database pool closed');
+    } catch (err) {
+      log('ERROR', 'Database pool close error:', err.message);
+    }
+
+    try {
+      await redisClient.quit();
+      log('INFO', '🔴 Redis connection closed');
+    } catch (err) {
+      log('ERROR', 'Redis close error:', err.message);
+    }
+
+    log('INFO', '✅ Graceful shutdown completed');
     process.exit(code);
   } catch (err) {
     log('ERROR', 'Shutdown error:', err.message);
@@ -2449,4 +2362,41 @@ async function shutdown(code = 0) {
   }
 }
 
+process.on('SIGINT', () => shutdown(0));
 process.on('SIGTERM', () => shutdown(0));
+
+process.on('uncaughtException', (err) => {
+  log('ERROR', '💥 Uncaught exception:', err);
+  shutdown(1);
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  log('ERROR', '💥 Unhandled rejection at:', promise, 'reason:', reason);
+  shutdown(1);
+});
+
+// ==================== START SERVER ====================
+server.listen(port, async () => {
+  log('INFO', `✅ Algeria osu! server running on port ${port}`);
+  log('INFO', `🔌 WebSocket server: ws://localhost:${port}/ws`);
+  log('INFO', `🌐 API endpoints: http://localhost:${port}/api/`);
+  log('INFO', `📊 Health check: http://localhost:${port}/health`);
+
+  await initializeServer();
+});
+
+// Export for testing
+module.exports = { app, server, playerDiscovery };
+
+// ==================== ROUTES LOGGING ====================
+app._router.stack.forEach((middleware) => {
+  if (middleware.route) {
+    console.log('Route:', middleware.route.path);
+  } else if (middleware.name === 'router' && middleware.handle.stack) {
+    middleware.handle.stack.forEach(handler => {
+      if (handler.route) {
+        console.log('Route:', handler.route.path);
+      }
+    });
+  }
+});
