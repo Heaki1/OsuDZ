@@ -2095,6 +2095,48 @@ app.post('/api/admin/force-scan', authenticateToken, asyncHandler(async (req, re
   res.json({ success: true, message: 'Manual scan started' });
 }));
 
+app.post("/api/admin/refresh-player-stats", authenticateToken, async (req, res) => {
+  if (req.user.role !== "admin") {
+    return res.status(403).json({ success: false, error: "Admin access required" });
+  }
+
+  try {
+    await pool.query('BEGIN');
+
+    await pool.query(`
+      UPDATE player_stats
+      SET total_scores = sub.count
+      FROM (
+        SELECT username, COUNT(*) AS count
+        FROM player_scores
+        GROUP BY username
+      ) AS sub
+      WHERE player_stats.username = sub.username
+    `);
+
+    await pool.query(`
+      UPDATE player_stats
+      SET avg_rank = sub.avg_rank
+      FROM (
+        SELECT username, AVG(rank) AS avg_rank
+        FROM player_scores
+        GROUP BY username
+      ) AS sub
+      WHERE player_stats.username = sub.username
+    `);
+
+    // Add more updates here...
+
+    await pool.query('COMMIT');
+
+    res.json({ success: true, message: "Player stats refreshed successfully" });
+  } catch (err) {
+    await pool.query('ROLLBACK');
+    console.error(err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 // Error handling middleware
 app.use((err, req, res, next) => {
   log('ERROR', 'Unhandled error:', err);
