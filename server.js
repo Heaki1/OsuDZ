@@ -1596,12 +1596,12 @@ app.get('/api/leaderboards', asyncHandler(async (req, res) => {
     player
   } = req.query;
 
-  const allowedSort = [
-    'score', 'rank', 'last_updated', 'pp',
-    'difficulty_rating', 'accuracy'
-  ];
-  const sortColumn = allowedSort.includes(sort) ? sort : 'score';
-  const sortOrder = order.toUpperCase() === 'ASC' ? 'ASC' : 'DESC';
+const allowedSort = [
+  'rank', 'last_updated', 'pp',
+  'difficulty_rating', 'accuracy', 'weighted_pp', 'total_scores'
+];
+const sortColumn = allowedSort.includes(sort) ? sort : 'weighted_pp';
+const sortOrder = order.toUpperCase() === 'ASC' ? 'ASC' : 'DESC';
 
   let params = [];
   let whereClauses = [];
