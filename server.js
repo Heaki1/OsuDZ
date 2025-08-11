@@ -116,31 +116,25 @@ const pool = new Pool({
     `);
 
     // === Auto-create missing columns for algeria_top50 ===
-    await pool.query(`
-    ALTER TABLE algeria_top50
-    ADD COLUMN IF NOT EXISTS pp REAL;
-    ADD COLUMN IF NOT EXISTS artist TEXT,
-    ADD COLUMN IF NOT EXISTS difficulty_name TEXT,
-    ADD COLUMN IF NOT EXISTS difficulty_rating REAL DEFAULT 0,
-    ADD COLUMN IF NOT EXISTS max_combo INTEGER DEFAULT 0,
-    ADD COLUMN IF NOT EXISTS count_300 INTEGER DEFAULT 0,
-    ADD COLUMN IF NOT EXISTS count_100 INTEGER DEFAULT 0,
-    ADD COLUMN IF NOT EXISTS count_50 INTEGER DEFAULT 0,
-    ADD COLUMN IF NOT EXISTS count_miss INTEGER DEFAULT 0,
-    ADD COLUMN IF NOT EXISTS accuracy REAL,
-    ADD COLUMN IF NOT EXISTS accuracy_text TEXT,
-    ADD COLUMN IF NOT EXISTS mods TEXT,
-    ADD COLUMN IF NOT EXISTS play_date BIGINT,
-    ADD COLUMN IF NOT EXISTS last_updated BIGINT;
-    `);
+    await pool.query(`ALTER TABLE algeria_top50 ADD COLUMN IF NOT EXISTS pp REAL;`);
+    await pool.query(`ALTER TABLE algeria_top50 ADD COLUMN IF NOT EXISTS artist TEXT;`);
+    await pool.query(`ALTER TABLE algeria_top50 ADD COLUMN IF NOT EXISTS difficulty_name TEXT;`);
+    await pool.query(`ALTER TABLE algeria_top50 ADD COLUMN IF NOT EXISTS difficulty_rating REAL DEFAULT 0;`);
+    await pool.query(`ALTER TABLE algeria_top50 ADD COLUMN IF NOT EXISTS max_combo INTEGER DEFAULT 0;`);
+    await pool.query(`ALTER TABLE algeria_top50 ADD COLUMN IF NOT EXISTS count_300 INTEGER DEFAULT 0;`);
+    await pool.query(`ALTER TABLE algeria_top50 ADD COLUMN IF NOT EXISTS count_100 INTEGER DEFAULT 0;`);
+    await pool.query(`ALTER TABLE algeria_top50 ADD COLUMN IF NOT EXISTS count_50 INTEGER DEFAULT 0;`);
+    await pool.query(`ALTER TABLE algeria_top50 ADD COLUMN IF NOT EXISTS count_miss INTEGER DEFAULT 0;`);
+    await pool.query(`ALTER TABLE algeria_top50 ADD COLUMN IF NOT EXISTS accuracy REAL;`);
+    await pool.query(`ALTER TABLE algeria_top50 ADD COLUMN IF NOT EXISTS accuracy_text TEXT;`);
+    await pool.query(`ALTER TABLE algeria_top50 ADD COLUMN IF NOT EXISTS mods TEXT;`);
+    await pool.query(`ALTER TABLE algeria_top50 ADD COLUMN IF NOT EXISTS play_date BIGINT;`);
+    await pool.query(`ALTER TABLE algeria_top50 ADD COLUMN IF NOT EXISTS last_updated BIGINT;`);
 
     // === Auto-create missing columns for player_stats ===
-    await pool.query(`
-      ALTER TABLE player_stats
-      ADD COLUMN IF NOT EXISTS user_id BIGINT,
-      ADD COLUMN IF NOT EXISTS last_seen TIMESTAMP DEFAULT now(),
-      ADD COLUMN IF NOT EXISTS join_date TIMESTAMP;
-    `);
+    await pool.query(`ALTER TABLE player_stats ADD COLUMN IF NOT EXISTS user_id BIGINT;`);
+    await pool.query(`ALTER TABLE player_stats ADD COLUMN IF NOT EXISTS last_seen TIMESTAMP DEFAULT now();`);
+    await pool.query(`ALTER TABLE player_stats ADD COLUMN IF NOT EXISTS join_date TIMESTAMP;`);
 
     log('INFO', '✅ Schema check completed (missing columns added if needed)');
   } catch (err) {
