@@ -2413,7 +2413,20 @@ if (RUN_BACKGROUND_JOBS) {
     }
   })();
 }
-// ---------- END BACKGROUND SCHEDULER ----------
+
+app._router.stack.forEach((middleware) => {
+  if (middleware.route) {
+    // Routes registered directly on the app
+    console.log('Route:', middleware.route.path)
+  } else if (middleware.name === 'router') {
+    // Router middleware 
+    middleware.handle.stack.forEach((handler) => {
+      if(handler.route) {
+        console.log('Route:', handler.route.path)
+      }
+    })
+  }
+})
 
 // Graceful shutdown
 async function shutdown(code = 0) {
