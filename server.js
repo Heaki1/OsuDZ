@@ -1583,18 +1583,16 @@ app.get('/health', asyncHandler(async (req, res) => {
   }
 }));
 
-// Enhanced leaderboards endpoint
 app.get('/api/leaderboards', asyncHandler(async (req, res) => {
   const {
     limit = 100,
     offset = 0,
     sort = 'score',
     order = 'DESC',
-    minDifficulty = 0,
-    maxDifficulty = 15,
+    minDifficulty,
+    maxDifficulty,
     mods,
-    player,
-    timeRange
+    player
   } = req.query;
 
   const allowedSort = [
@@ -1607,12 +1605,11 @@ app.get('/api/leaderboards', asyncHandler(async (req, res) => {
   let params = [];
   let whereClauses = [];
 
-  // Filters
-  if (minDifficulty) {
+  if (minDifficulty !== undefined && minDifficulty !== '') {
     params.push(parseFloat(minDifficulty));
     whereClauses.push(`difficulty_rating >= $${params.length}`);
   }
-  if (maxDifficulty) {
+  if (maxDifficulty !== undefined && maxDifficulty !== '') {
     params.push(parseFloat(maxDifficulty));
     whereClauses.push(`difficulty_rating <= $${params.length}`);
   }
@@ -1621,15 +1618,13 @@ app.get('/api/leaderboards', asyncHandler(async (req, res) => {
     whereClauses.push(`mods = $${params.length}`);
   }
   if (player) {
-    params.push(player);
+    params.push(`%${player}%`);
     whereClauses.push(`username ILIKE $${params.length}`);
   }
 
   const whereClause = whereClauses.length ? `WHERE ${whereClauses.join(' AND ')}` : '';
 
-  // Pagination parameters (sync paramCount with current length)
-  let paramCount = params.length;
-  params.push(parseInt(limit), parseInt(offset));
+  const paramCount = params.length;
 
   const sql = `
     SELECT *,
@@ -1637,8 +1632,10 @@ app.get('/api/leaderboards', asyncHandler(async (req, res) => {
     FROM player_stats
     ${whereClause}
     ORDER BY ${sortColumn} ${sortOrder}
-    LIMIT $${++paramCount} OFFSET $${++paramCount}
+    LIMIT $${paramCount + 1} OFFSET $${paramCount + 2}
   `;
+
+  params.push(parseInt(limit), parseInt(offset));
 
   const data = await getRows(sql, params);
 
