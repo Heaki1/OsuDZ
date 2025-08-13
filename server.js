@@ -3,13 +3,11 @@ const express = require('express');
 const path = require('path');
 const http = require('http');
 const fs = require('fs');
-
-// Keep original setup logic
 const helmet = require('helmet');
 const cors = require('cors');
 const rateLimit = require('express-rate-limit');
 
-// ==================== SAFE LOADER HELPERS ====================
+// ===== SAFE LOADER HELPERS =====
 function safeRequire(label, filePath) {
     try {
         const mod = require(filePath);
@@ -36,7 +34,7 @@ function runJob(fileName, jobFn) {
     }
 }
 
-// ==================== ENVIRONMENT VALIDATION ====================
+// ===== ENVIRONMENT VALIDATION =====
 const requiredEnvVars = [
     'OSU_CLIENT_ID', 'OSU_CLIENT_SECRET', 
     'DATABASE_URL', 'REDIS_URL', 'JWT_SECRET'
@@ -48,18 +46,17 @@ requiredEnvVars.forEach(envVar => {
     }
 });
 
-// ==================== APP INITIALIZATION ====================
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Trust proxy & security headers
+// ===== BASIC SECURITY & PARSING =====
 app.set('trust proxy', 1);
 app.use(helmet());
 app.use(cors());
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 
-// ==================== RATE LIMITING ====================
+// ===== RATE LIMITING =====
 const createRateLimit = (windowMs, max, message) => rateLimit({
     windowMs,
     max,
@@ -70,14 +67,14 @@ const createRateLimit = (windowMs, max, message) => rateLimit({
 app.use('/api/', createRateLimit(15 * 60 * 1000, 100, 'Too many API requests'));
 app.use('/api/admin/', createRateLimit(15 * 60 * 1000, 20, 'Too many admin requests'));
 
-// ==================== LOAD MIDDLEWARES ====================
+// ===== LOAD MIDDLEWARES SAFELY =====
 [
     'security',
     'requestLogging',
     'rateLimiting'
 ].forEach(mw => {
     const mod = safeRequire(`middleware ${mw}`, `./middleware/${mw}`);
-    const fn = (typeof mod === 'function') ? mod : 
+    const fn = (typeof mod === 'function') ? mod :
                (mod && typeof mod.default === 'function' ? mod.default : null);
 
     if (fn) {
@@ -87,7 +84,7 @@ app.use('/api/admin/', createRateLimit(15 * 60 * 1000, 20, 'Too many admin reque
     }
 });
 
-// ==================== LOAD ROUTES ====================
+// ===== LOAD ROUTES SAFELY =====
 fs.readdirSync(path.join(__dirname, 'routes')).forEach(file => {
     if (file.endsWith('.js')) {
         const routePath = `/api/${file.replace('.js', '')}`;
@@ -103,21 +100,21 @@ fs.readdirSync(path.join(__dirname, 'routes')).forEach(file => {
     }
 });
 
-// Health check route always present
+// ===== HEALTH CHECK =====
 app.get('/health', (req, res) => {
     res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
-// Serve public files
+// ===== STATIC FILES =====
 app.use(express.static(path.join(__dirname, 'public')));
 
-// Not found + error handler middlewares
+// ===== ERROR HANDLERS =====
 const notFound = safeRequire('notFound middleware', './middleware/notFound');
-if (notFound) app.use(notFound);
+if (typeof notFound === 'function') app.use(notFound);
 const errorHandler = safeRequire('errorHandler middleware', './middleware/errorHandler');
-if (errorHandler) app.use(errorHandler);
+if (typeof errorHandler === 'function') app.use(errorHandler);
 
-// ==================== START JOBS ====================
+// ===== JOBS =====
 console.log('\n🔄 Starting jobs...\n');
 fs.readdirSync(path.join(__dirname, 'jobs')).forEach(file => {
     if (file.endsWith('.js') && !file.startsWith('schedulingUtils')) {
@@ -126,15 +123,15 @@ fs.readdirSync(path.join(__dirname, 'jobs')).forEach(file => {
     }
 });
 
-// ==================== START SERVER ====================
+// ===== START SERVER =====
 const server = http.createServer(app);
 server.listen(PORT, () => {
     console.log(`\n🚀 Server running on port ${PORT}`);
 });
 
-// ==================== WEBSOCKET ====================
+// ===== WEBSOCKET =====
 const websocket = safeRequire('websocket middleware', './middleware/websocket');
-if (websocket) {
+if (typeof websocket === 'function') {
     try {
         websocket(server);
     } catch (err) {
