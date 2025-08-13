@@ -1,4 +1,5 @@
-const { playerDiscovery } = require('../services/playerDiscovery');
+const { PlayerDiscoveryService } = require('../services/playerDiscovery');
+const playerDiscovery = new PlayerDiscoveryService();
 
 async function fetchAlgerianPlayersJob() {
   console.log('🔄 Starting comprehensive player discovery...');
@@ -6,14 +7,7 @@ async function fetchAlgerianPlayersJob() {
   try {
     const results = await playerDiscovery.runDiscovery();
     const total = Object.values(results).reduce((sum, count) => sum + count, 0);
-    
-    console.log(`✅ Discovery completed - Found ${total} new players:`, {
-      countryRankings: results.countryRankings,
-      recentScores: results.recentScores,
-      userSearch: results.userSearch,
-      multiplayerMatches: results.multiplayerMatches
-    });
-    
+    console.log(`✅ Discovery completed - Found ${total} new players`, results);
     return results;
   } catch (err) {
     console.error('❌ Player discovery failed:', err.message);

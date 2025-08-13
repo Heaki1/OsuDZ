@@ -56,7 +56,4 @@ const trustProxy = (app) => {
   app.set('trust proxy', 1);
 };
 
-module.exports = {
-  securityMiddleware,
-  trustProxy
-};
+module.exports = securityMiddleware;

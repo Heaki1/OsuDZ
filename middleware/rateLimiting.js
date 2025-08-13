@@ -1,8 +1,8 @@
-const rateLimit = require('express-rate-limit');
+const { ipKeyGenerator } = require('express-rate-limit');
 
 // Enhanced rate limiting
-const createRateLimit = (windowMs, max, message) => rateLimit({
-  windowMs,
+const limiter = rateLimit({
+  keyGenerator: ipKeyGenerator,
   max: (req) => req.user ? max * 2 : max, // Higher limits for authenticated users
   message: { success: false, error: message },
   standardHeaders: true,
