@@ -77,7 +77,14 @@ app.use('/api/admin/', createRateLimit(15 * 60 * 1000, 20, 'Too many admin reque
     'rateLimiting'
 ].forEach(mw => {
     const mod = safeRequire(`middleware ${mw}`, `./middleware/${mw}`);
-    if (mod) app.use(mod);
+    const fn = (typeof mod === 'function') ? mod : 
+               (mod && typeof mod.default === 'function' ? mod.default : null);
+
+    if (fn) {
+        app.use(fn);
+    } else {
+        console.warn(`⚠️ Middleware ${mw} is not a function, skipping...`);
+    }
 });
 
 // ==================== LOAD ROUTES ====================
