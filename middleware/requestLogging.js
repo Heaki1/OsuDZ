@@ -123,8 +123,7 @@ const performanceLogger = (req, res, next) => {
   next();
 };
 
-module.exports = {
-  requestLogger,
-  simpleLogger,
-  performanceLogger
-};
+module.exports = requestLogger;
+module.exports.requestLogger = requestLogger;
+module.exports.simpleLogger = simpleLogger;
+module.exports.performanceLogger = performanceLogger;

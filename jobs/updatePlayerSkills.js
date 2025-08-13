@@ -7,19 +7,17 @@ async function updatePlayerSkillsJob() {
   
   try {
     // Get all active players
-    const players = await query(`
-      SELECT username 
-      FROM player_stats 
-      WHERE is_active = true 
-      AND total_scores > 0
-      ORDER BY last_calculated ASC
-      LIMIT 100
-    `);
+const result = await query(`
+  SELECT username 
+  FROM player_stats 
+  WHERE is_active = true 
+  AND total_scores > 0
+  ORDER BY last_calculated ASC
+  LIMIT 100
+`);
+const players = result.rows || [];
 
-    let updatedCount = 0;
-    let errorCount = 0;
-
-    for (const player of players) {
+for (const player of players) {
       try {
         // Get player's scores for skill calculation
         const playerScores = await query(`
