@@ -1,5 +1,10 @@
 const { Pool } = require('pg');
 
+if (!process.env.DATABASE_URL) {
+  console.error('❌ DATABASE_URL not set');
+  process.exit(1);
+}
+
 // Database connection pool
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
@@ -268,6 +273,13 @@ async function closePool() {
   }
 }
 
+// --- NEW: one-call bootstrap ---
+async function connectDB() {
+  const ok = await testConnection();
+  if (!ok) process.exit(1);
+  await ensureTables();
+}
+
 module.exports = {
   pool,
   query,
@@ -275,5 +287,6 @@ module.exports = {
   getRow,
   ensureTables,
   testConnection,
-  closePool
+  closePool,
+  connectDB
 };
