@@ -127,6 +127,15 @@ fs.readdirSync(path.join(__dirname, 'jobs')).forEach(file => {
 const server = http.createServer(app);
 server.listen(PORT, () => {
     console.log(`\n🚀 Server running on port ${PORT}`);
+
+    // Start jobs after the server is ready
+    console.log('\n🔄 Starting jobs...\n');
+    fs.readdirSync(path.join(__dirname, 'jobs')).forEach(file => {
+        if (file.endsWith('.js') && !file.startsWith('schedulingUtils')) {
+            const jobModule = safeRequire(`job ${file}`, `./jobs/${file}`);
+            if (jobModule) runJob(file, jobModule);
+        }
+    });
 });
 
 // ===== WEBSOCKET =====

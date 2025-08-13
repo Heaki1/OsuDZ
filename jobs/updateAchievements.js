@@ -158,7 +158,7 @@ async function checkPlayerAchievements(username) {
             newAchievements.push({
               name: check.name,
               description: check.description,
-              unlockedAt: Date.now()
+              unlockedAt: new Date()
             });
           }
         }
