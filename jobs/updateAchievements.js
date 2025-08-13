@@ -179,7 +179,7 @@ async function updateAchievementsJob() {
   try {
     // Get players who need achievement checks (recently active)
 
-const cutoffDate = new Date(Date.now() - 24 * 60 * 60 * 1000);
+const cutoffDate = Math.floor(Date.now() / 1000);
 const players = await query(`
   SELECT DISTINCT username 
   FROM player_stats 
