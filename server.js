@@ -114,15 +114,6 @@ if (typeof notFound === 'function') app.use(notFound);
 const errorHandler = safeRequire('errorHandler middleware', './middleware/errorHandler');
 if (typeof errorHandler === 'function') app.use(errorHandler);
 
-// ===== JOBS =====
-console.log('\n🔄 Starting jobs...\n');
-fs.readdirSync(path.join(__dirname, 'jobs')).forEach(file => {
-    if (file.endsWith('.js') && !file.startsWith('schedulingUtils')) {
-        const jobModule = safeRequire(`job ${file}`, `./jobs/${file}`);
-        if (jobModule) runJob(file, jobModule);
-    }
-});
-
 // ===== START SERVER =====
 const server = http.createServer(app);
 server.listen(PORT, () => {
