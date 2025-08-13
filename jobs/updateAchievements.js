@@ -178,18 +178,20 @@ async function updateAchievementsJob() {
   
   try {
     // Get players who need achievement checks (recently active)
-    const players = await query(`
-      SELECT DISTINCT username 
-      FROM player_stats 
-      WHERE is_active = true 
-      AND (
-        last_seen > $1 OR 
-        last_calculated > $1 OR
-        last_seen IS NULL
-      )
-      ORDER BY last_seen DESC
-      LIMIT 50
-    `, [Date.now() - (24 * 60 * 60 * 1000)]); // Last 24 hours
+
+const cutoffDate = new Date(Date.now() - 24 * 60 * 60 * 1000);
+const players = await query(`
+  SELECT DISTINCT username 
+  FROM player_stats 
+  WHERE is_active = true 
+  AND (
+    last_seen > $1 OR 
+    last_calculated > $1 OR
+    last_seen IS NULL
+  )
+  ORDER BY last_seen DESC
+  LIMIT 50
+`, [cutoffDate]);
 
     let totalNewAchievements = 0;
     let processedPlayers = 0;

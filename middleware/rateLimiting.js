@@ -16,11 +16,11 @@ const authRateLimit = createRateLimit(15 * 60 * 1000, 5, 'Too many authenticatio
 const searchRateLimit = createRateLimit(1 * 60 * 1000, 30, 'Too many search requests');
 const heavyRateLimit = createRateLimit(5 * 60 * 1000, 10, 'Too many resource-intensive requests');
 
-module.exports = {
-  apiRateLimit,
-  adminRateLimit,
-  authRateLimit,
-  searchRateLimit,
-  heavyRateLimit,
-  createRateLimit
-};
+module.exports = apiRateLimit; 
+module.exports.apiRateLimit = apiRateLimit;
+module.exports.adminRateLimit = adminRateLimit;
+module.exports.authRateLimit = authRateLimit;
+module.exports.searchRateLimit = searchRateLimit;
+module.exports.heavyRateLimit = heavyRateLimit;
+module.exports.createRateLimit = createRateLimit;
+
