@@ -92,7 +92,14 @@ fs.readdirSync(path.join(__dirname, 'routes')).forEach(file => {
     if (file.endsWith('.js')) {
         const routePath = `/api/${file.replace('.js', '')}`;
         const route = safeRequire(`route ${file}`, `./routes/${file}`);
-        if (route) app.use(routePath, route);
+        const fn = (typeof route === 'function') ? route :
+                   (route && typeof route.default === 'function' ? route.default : null);
+
+        if (fn) {
+            app.use(routePath, fn);
+        } else {
+            console.warn(`⚠️ Route ${file} is not a valid middleware/router, skipping...`);
+        }
     }
 });
 
